@@ -1,0 +1,96 @@
+classDiagram
+    direction LR
+    note "Represents C structs and related functions"
+
+    class Admin {
+        <<Role>>
+        +handleAdminSession()
+        +createNewStaff()
+        +modifyUser()
+        +updateStaffRole()
+        +changeAdminPassword()
+    }
+
+    class Manager {
+        <<Role>>
+        +handleManagerSession()
+        +authenticateManager()
+        +setAccountActiveStatus()
+        +assignLoanToStaff()
+        +reviewClientFeedback()
+        +updateManagerPassword()
+    }
+
+    class BankStaff {
+        <<struct>>
+        staffID: int
+        firstName: string
+        lastName: string
+        password: string
+        roleType: int
+        <<Functions>>
+        +handleStaffSession()
+        +authenticateStaff()
+        +createNewCustomerAccount()
+        +processLoanApplication()
+        +viewAssignedLoans()
+        +updateStaffPassword()
+        +modifyUser()  // Calls admin func
+        +viewTransactionLogs() // Calls customer func
+    }
+
+    class AccountHolder {
+        <<struct>>
+        accountID: int
+        currentBalance: float
+        holderName: string
+        password: string
+        isActive: int
+        <<Functions>>
+        +handleCustomerSession()
+        +authenticateCustomer()
+        +processWithdrawal()
+        +processDeposit()
+        +checkBalance()
+        +requestLoan()
+        +executeTransfer()
+        +submitFeedback()
+        +viewTransactionLogs()
+        +updateCustomerPassword()
+        +endUserSession() // Shared logout
+    }
+
+    class LoanRecord {
+        <<struct>>
+        assignedStaffID: int
+        accountID: int
+        loanRecordID: int
+        amount: int
+        loanStatus: int
+    }
+
+    class TransactionLog {
+        <<struct>>
+        accountID: int
+        logEntry: string
+    }
+
+    class ClientFeedback {
+        <<struct>>
+        message: string
+    }
+
+    class IDGenerator {
+        <<struct>>
+        nextID: int
+    }
+
+    Admin ..> BankStaff : "Manages"
+    Manager --|> BankStaff : "Is-A (roleType 0)"
+    BankStaff "1" -- "0..*" AccountHolder : "Manages/Creates"
+    BankStaff "1" -- "0..*" LoanRecord : "Processes"
+    Manager "1" -- "0..*" LoanRecord : "Assigns"
+    Manager "1" -- "0..*" ClientFeedback : "Reviews"
+    AccountHolder "1" -- "0..*" LoanRecord : "Applies for"
+    AccountHolder "1" -- "0..*" TransactionLog : "Has"
+    AccountHolder "1" -- "1" ClientFeedback : "Gives"
