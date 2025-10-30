@@ -609,7 +609,7 @@ label_admin_login:
             default:
                 bzero(outBuffer, sizeof(outBuffer));
                 strcpy(outBuffer, "Invalid choice!^");
-                write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); /
+                write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); 
         }
     }
 }
