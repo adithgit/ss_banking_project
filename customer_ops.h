@@ -552,7 +552,7 @@ void requestLoan(int clientSocket, int accountID){
     struct flock loanDBLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file
     fcntl(loanFile, F_SETLKW, &loanDBLock);
 
-    loan.assignedStaffID = -1;
+    loan.assignedEmployeeID = -1;
     loan.accountID = accountID;
     loan.amount = loanAmount;
     loan.loanStatus = 0; // Requested

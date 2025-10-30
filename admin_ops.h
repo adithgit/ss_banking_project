@@ -18,17 +18,17 @@
 
 // --- Function Prototypes ---
 void changeAdminPassword(int clientSocket);
-int createNewStaff(int clientSocket);
+int createNewEmployee(int clientSocket);
 void modifyUser(int clientSocket, int modifyType);
-void updateStaffRole(int clientSocket);
+void updateEmployeeRole(int clientSocket);
 void handleAdminSession(int clientSocket); // Main handler prototype
 
 // --- Function Definitions ---
 
-// Function to add a new staff member (Employee or Manager by default role)
-int createNewStaff(int clientSocket)
+// Function to add a new Employee member (Employee or Manager by default role)
+int createNewEmployee(int clientSocket)
 {
-    struct BankStaff staff, tempStaff; // Define structs needed
+    struct Employee employee, tempEmployee; // Define structs needed
 
     // Get Employee ID
     bzero(outBuffer, sizeof(outBuffer));
@@ -36,15 +36,15 @@ int createNewStaff(int clientSocket)
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
-        printf("Client disconnected during staff ID entry.\n"); return 0; // Indicate failure
+        printf("Client disconnected during employee ID entry.\n"); return 0; // Indicate failure
     }
     inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
-    staff.staffID = atoi(inBuffer);
+    employee.employeeID = atoi(inBuffer);
 
-    // --- Check for duplicate Staff ID ---
-    int dbFile = open(STAFF_DB, O_RDWR | O_CREAT, 0644);
+    // --- Check for duplicate Employee ID ---
+    int dbFile = open(EMPLOYEE_DB, O_RDWR | O_CREAT, 0644);
     if(dbFile == -1) {
-        perror("CreateStaff: Error opening staff DB");
+        perror("CreateEmployee: Error opening Employee DB");
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Database error.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         return 0; // Indicate failure
@@ -53,7 +53,7 @@ int createNewStaff(int clientSocket)
     // Acquire an EXCLUSIVE lock on the ENTIRE file
     struct flock lock = {F_WRLCK, SEEK_SET, 0, 0, getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
-        perror("CreateStaff: Failed to lock staff DB");
+        perror("CreateEmployee: Failed to lock Employee DB");
         close(dbFile);
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Database lock error.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
@@ -62,8 +62,8 @@ int createNewStaff(int clientSocket)
 
     int duplicateFound = 0;
     lseek(dbFile, 0, SEEK_SET); // Go to start
-    while(read(dbFile, &tempStaff, sizeof(tempStaff)) == sizeof(tempStaff)) { // Check read result
-        if (tempStaff.staffID == staff.staffID) {
+    while(read(dbFile, &tempEmployee, sizeof(tempEmployee)) == sizeof(tempEmployee)) { // Check read result
+        if (tempEmployee.employeeID == employee.employeeID) {
             duplicateFound = 1;
             break;
         }
@@ -76,7 +76,7 @@ int createNewStaff(int clientSocket)
         close(dbFile);
 
         bzero(outBuffer, sizeof(outBuffer));
-        strcpy(outBuffer, "Staff ID already exists. Please try again.^");
+        strcpy(outBuffer, "Employee ID already exists. Please try again.^");
         write(clientSocket, outBuffer, strlen(outBuffer));
         read(clientSocket, inBuffer, 3); // ack
         return 0; // Return failure
@@ -89,11 +89,11 @@ int createNewStaff(int clientSocket)
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
-        printf("Client disconnected during first name entry.\n"); goto createstaff_unlock_fail;
+        printf("Client disconnected during first name entry.\n"); goto createemployee_unlock_fail;
     }
     inBuffer[strcspn(inBuffer, "\r\n")] = 0;
-    strncpy(staff.firstName, inBuffer, sizeof(staff.firstName) - 1);
-     staff.firstName[sizeof(staff.firstName) - 1] = '\0';
+    strncpy(employee.firstName, inBuffer, sizeof(employee.firstName) - 1);
+     employee.firstName[sizeof(employee.firstName) - 1] = '\0';
 
 
     // Get LastName
@@ -102,11 +102,11 @@ int createNewStaff(int clientSocket)
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
-        printf("Client disconnected during last name entry.\n"); goto createstaff_unlock_fail;
+        printf("Client disconnected during last name entry.\n"); goto createemployee_unlock_fail;
     }
     inBuffer[strcspn(inBuffer, "\r\n")] = 0;
-    strncpy(staff.lastName, inBuffer, sizeof(staff.lastName) - 1);
-     staff.lastName[sizeof(staff.lastName) - 1] = '\0';
+    strncpy(employee.lastName, inBuffer, sizeof(employee.lastName) - 1);
+     employee.lastName[sizeof(employee.lastName) - 1] = '\0';
 
     // Get Password
     bzero(outBuffer, sizeof(outBuffer));
@@ -114,35 +114,35 @@ int createNewStaff(int clientSocket)
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
-        printf("Client disconnected during password entry.\n"); goto createstaff_unlock_fail;
+        printf("Client disconnected during password entry.\n"); goto createemployee_unlock_fail;
     }
     inBuffer[strcspn(inBuffer, "\r\n")] = 0;
-    strncpy(staff.password, inBuffer, sizeof(staff.password) - 1);
-    staff.password[sizeof(staff.password) - 1] = '\0';
+    strncpy(employee.password, inBuffer, sizeof(employee.password) - 1);
+    employee.password[sizeof(employee.password) - 1] = '\0';
 
 
-    staff.roleType = 1; // Default to 1 (Staff)
+    employee.roleType = 1; // Default to 1 (employee)
 
     // We still hold the lock, so we can safely append
     lseek(dbFile, 0, SEEK_END);
-    write(dbFile, &staff, sizeof(staff));
+    write(dbFile, &employee, sizeof(employee));
 
     // Release the lock
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
 
-    printf("Admin added staff ID: %d\n", staff.staffID);
+    printf("Admin added employee ID: %d\n", employee.employeeID);
     return 1; // Return success
 
-createstaff_unlock_fail: // Label for cleanup on disconnect
+createemployee_unlock_fail: // Label for cleanup on disconnect
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
     return 0; // Indicate failure
 }
 
-// Function to modify Customer name or Staff first name
+// Function to modify Customer name or employee first name
 void modifyUser(int clientSocket, int modifyType)
 {
     if(modifyType == 1) // Modify Customer
@@ -226,7 +226,7 @@ void modifyUser(int clientSocket, int modifyType)
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
 
-        printf("Admin/Staff modified name for account %d\n", accountID);
+        printf("Admin/employee modified name for account %d\n", accountID);
         bzero(outBuffer, sizeof(outBuffer));
         strcpy(outBuffer, "Customer name updated.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
@@ -240,10 +240,10 @@ void modifyUser(int clientSocket, int modifyType)
     }
     else if(modifyType == 2) // Modify Employee
     {
-        struct BankStaff staff;
-        int dbFile = open(STAFF_DB, O_RDWR);
+        struct Employee employee;
+        int dbFile = open(EMPLOYEE_DB, O_RDWR);
         if(dbFile == -1) {
-            perror("Modify Staff: Error opening DB");
+            perror("Modify employee: Error opening DB");
             bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Database error.^");
             write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
              return;
@@ -253,34 +253,34 @@ void modifyUser(int clientSocket, int modifyType)
         strcpy(outBuffer, "Enter Employee ID: ");
         write(clientSocket, outBuffer, strlen(outBuffer));
 
-        int staffID;
+        int employeeID;
         bzero(inBuffer, sizeof(inBuffer));
          if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { close(dbFile); return; }
         inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
-        staffID = atoi(inBuffer);
+        employeeID = atoi(inBuffer);
 
         int offset = -1;
         off_t currentPos = 0;
         lseek(dbFile, 0, SEEK_SET);
-        while (read(dbFile, &staff, sizeof(staff)) > 0)
+        while (read(dbFile, &employee, sizeof(employee)) > 0)
         {
-            currentPos = lseek(dbFile, 0, SEEK_CUR) - sizeof(staff);
-            if(staff.staffID == staffID) {
+            currentPos = lseek(dbFile, 0, SEEK_CUR) - sizeof(employee);
+            if(employee.employeeID == employeeID) {
                 offset = currentPos;
                 break;
             }
         }
 
         if(offset == -1) {
-             bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Staff ID not found.^");
+             bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "employee ID not found.^");
              write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
              close(dbFile);
              return;
          }
 
-        struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct BankStaff), getpid()};
+        struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct Employee), getpid()};
         if(fcntl(dbFile, F_SETLKW, &lock) == -1) {
-            perror("Modify Staff: Lock failed"); close(dbFile);
+            perror("Modify employee: Lock failed"); close(dbFile);
              bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Database lock error.^");
             write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
             return;
@@ -292,7 +292,7 @@ void modifyUser(int clientSocket, int modifyType)
         write(clientSocket, outBuffer, strlen(outBuffer));
         bzero(inBuffer, sizeof(inBuffer));
          if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
-             printf("Client disconnected during staff name entry.\n"); goto modifystaff_unlock_fail;
+             printf("Client disconnected during employee name entry.\n"); goto modifyemployee_unlock_fail;
          }
         inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
         strncpy(newFirstName, inBuffer, sizeof(newFirstName) - 1);
@@ -300,28 +300,28 @@ void modifyUser(int clientSocket, int modifyType)
 
         // Re-read before write
         lseek(dbFile, offset, SEEK_SET);
-         if (read(dbFile, &staff, sizeof(staff)) != sizeof(staff)) {
-             perror("Modify Staff: Re-read failed"); goto modifystaff_unlock_fail;
+         if (read(dbFile, &employee, sizeof(employee)) != sizeof(employee)) {
+             perror("Modify employee: Re-read failed"); goto modifyemployee_unlock_fail;
          }
 
-        strncpy(staff.firstName, newFirstName, sizeof(staff.firstName) - 1);
-         staff.firstName[sizeof(staff.firstName) - 1] = '\0';
+        strncpy(employee.firstName, newFirstName, sizeof(employee.firstName) - 1);
+         employee.firstName[sizeof(employee.firstName) - 1] = '\0';
 
 
         lseek(dbFile, offset, SEEK_SET);
-        write(dbFile, &staff, sizeof(staff));
+        write(dbFile, &employee, sizeof(employee));
 
         lock.l_type = F_UNLCK;
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
 
-        printf("Admin modified name for staff %d\n", staffID);
+        printf("Admin modified name for employee %d\n", employeeID);
         bzero(outBuffer, sizeof(outBuffer));
-        strcpy(outBuffer, "Staff name updated.^");
+        strcpy(outBuffer, "employee name updated.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         return; // Success
 
-    modifystaff_unlock_fail: // Cleanup on error/disconnect
+    modifyemployee_unlock_fail: // Cleanup on error/disconnect
         lock.l_type = F_UNLCK;
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
@@ -333,35 +333,35 @@ void modifyUser(int clientSocket, int modifyType)
     }
 }
 
-// Function to change a staff member's role (Manager <-> Employee)
-void updateStaffRole(int clientSocket)
+// Function to change a employee member's role (Manager <-> Employee)
+void updateEmployeeRole(int clientSocket)
 {
-    int dbFile = open(STAFF_DB, O_RDWR);
+    int dbFile = open(EMPLOYEE_DB, O_RDWR);
     if(dbFile == -1) {
-        perror("UpdateRole: Error opening staff DB");
+        perror("UpdateRole: Error opening employee DB");
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Database error.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         return;
     }
 
     bzero(outBuffer, sizeof(outBuffer));
-    strcpy(outBuffer, "Enter Staff ID to change role: ");
+    strcpy(outBuffer, "Enter employee ID to change role: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
 
-    int staffID;
+    int employeeID;
     bzero(inBuffer, sizeof(inBuffer));
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { close(dbFile); return; }
     inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
-    staffID = atoi(inBuffer);
+    employeeID = atoi(inBuffer);
 
-    struct BankStaff staff;
+    struct Employee employee;
     int offset = -1;
     off_t currentPos = 0;
     lseek(dbFile, 0, SEEK_SET);
-    while(read(dbFile, &staff, sizeof(staff)) > 0)
+    while(read(dbFile, &employee, sizeof(employee)) > 0)
     {
-        currentPos = lseek(dbFile, 0, SEEK_CUR) - sizeof(staff);
-        if(staff.staffID == staffID) {
+        currentPos = lseek(dbFile, 0, SEEK_CUR) - sizeof(employee);
+        if(employee.employeeID == employeeID) {
             offset = currentPos;
             break;
         }
@@ -369,14 +369,14 @@ void updateStaffRole(int clientSocket)
 
     if(offset == -1) {
         bzero(outBuffer, sizeof(outBuffer));
-        strcpy(outBuffer, "Invalid Staff ID^");
+        strcpy(outBuffer, "Invalid employee ID^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         close(dbFile);
         return;
     }
 
     // Lock record
-    struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct BankStaff), getpid()};
+    struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct Employee), getpid()};
     if(fcntl(dbFile, F_SETLKW, &lock) == -1) {
          perror("UpdateRole: Lock failed"); close(dbFile);
          bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Database lock error.^");
@@ -387,15 +387,15 @@ void updateStaffRole(int clientSocket)
 
     // Re-read data after lock
     lseek(dbFile, offset, SEEK_SET);
-    if (read(dbFile, &staff, sizeof(staff)) != sizeof(staff)) {
+    if (read(dbFile, &employee, sizeof(employee)) != sizeof(employee)) {
         perror("UpdateRole: Re-read failed"); goto updaterole_unlock_fail;
     }
 
 
     int choice;
     bzero(outBuffer, sizeof(outBuffer));
-    sprintf(outBuffer, "Staff %d is currently %s.\n[0] Make Manager\n[1] Make Employee\nChoice: ",
-            staffID, (staff.roleType == 0) ? "Manager" : "Employee");
+    sprintf(outBuffer, "employee %d is currently %s.\n[0] Make Manager\n[1] Make Employee\nChoice: ",
+            employeeID, (employee.roleType == 0) ? "Manager" : "Employee");
     write(clientSocket, outBuffer, strlen(outBuffer));
 
     bzero(inBuffer, sizeof(inBuffer));
@@ -406,18 +406,18 @@ void updateStaffRole(int clientSocket)
     choice = atoi(inBuffer);
 
     int roleChanged = 0;
-    if(choice == 0 && staff.roleType != 0) {
-        staff.roleType = 0; // Manager
+    if(choice == 0 && employee.roleType != 0) {
+        employee.roleType = 0; // Manager
         roleChanged = 1;
-    } else if (choice == 1 && staff.roleType != 1) {
-        staff.roleType = 1; // Staff
+    } else if (choice == 1 && employee.roleType != 1) {
+        employee.roleType = 1; // employee
         roleChanged = 1;
     }
 
     if (roleChanged) {
         lseek(dbFile, offset, SEEK_SET);
-        write(dbFile, &staff, sizeof(staff));
-        printf("Admin changed role for staff %d to %s\n", staffID, (staff.roleType == 0 ? "Manager" : "Employee"));
+        write(dbFile, &employee, sizeof(employee));
+        printf("Admin changed role for employee %d to %s\n", employeeID, (employee.roleType == 0 ? "Manager" : "Employee"));
         bzero(outBuffer, sizeof(outBuffer));
         strcpy(outBuffer, "Role updated.^");
     } else {
@@ -612,10 +612,10 @@ label_admin_login:
 
         switch (choice) {
             case 1: // Add New Employee
-                if(createNewStaff(clientSocket)) {
+                if(createNewEmployee(clientSocket)) {
                     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Employee added successfully^");
                 } else {
-                    // Error message already sent by createNewStaff if needed
+                    // Error message already sent by createNewEmployee if needed
                     strcpy(outBuffer, "^"); // Send empty ack if needed
                 }
                 write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); // ack
@@ -635,7 +635,7 @@ label_admin_login:
                 modifyUser(clientSocket, modifyType); // modifyUser handles its own acks
                 break;
             case 3: // Manage Roles
-                updateStaffRole(clientSocket); // handles its own acks
+                updateEmployeeRole(clientSocket); // handles its own acks
                 break;
             case 4: // Change Password
                 changeAdminPassword(clientSocket); // handles its own acks

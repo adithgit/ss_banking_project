@@ -16,25 +16,25 @@
 int authenticateManager(int clientSocket, int managerID, char *password_input);
 void setAccountActiveStatus(int clientSocket);
 void reviewClientFeedback(int clientSocket);
-void assignLoanToStaff(int clientSocket);
+void assignLoanToEmployee(int clientSocket);
 int updateManagerPassword(int clientSocket, int managerID);
 void handleManagerSession(int clientSocket); // Main handler prototype
-// Note: updateStaffPassword is defined in staff_ops.h but declared/called here
+// Note: updateEmployeePassword is defined in employee_ops.h but declared/called here
 
 // --- Function Definitions ---
 
 // Authenticate a manager (Role 0)
 int authenticateManager(int clientSocket, int managerID, char *password_input)
 {
-    struct BankStaff manager;
-    int dbFile = open(STAFF_DB, O_RDONLY); // Open RDONLY first
+    struct Employee manager;
+    int dbFile = open(EMPLOYEE_DB, O_RDONLY); // Open RDONLY first
     if (dbFile == -1) {
          if (errno == ENOENT) { // File doesn't exist? Create empty one
-             dbFile = open(STAFF_DB, O_WRONLY | O_CREAT, 0644);
+             dbFile = open(EMPLOYEE_DB, O_WRONLY | O_CREAT, 0644);
              if (dbFile != -1) close(dbFile);
-             printf("Created empty staff database file: %s\n", STAFF_DB);
+             printf("Created empty employee database file: %s\n", EMPLOYEE_DB);
          } else {
-            perror("AuthMgr: Error opening staff DB for read");
+            perror("AuthMgr: Error opening employee DB for read");
             return 0; // Cannot authenticate
          }
     } else {
@@ -62,9 +62,9 @@ int authenticateManager(int clientSocket, int managerID, char *password_input)
     }
 
     // Now open for reading credentials
-     dbFile = open(STAFF_DB, O_RDONLY);
+     dbFile = open(EMPLOYEE_DB, O_RDONLY);
      if (dbFile == -1) {
-          perror("AuthMgr: Error opening staff DB for login check");
+          perror("AuthMgr: Error opening employee DB for login check");
           sem_post(sessionSemaphore); sem_close(sessionSemaphore); sem_unlink(sessionSemName);
           return 0;
      }
@@ -75,7 +75,7 @@ int authenticateManager(int clientSocket, int managerID, char *password_input)
     while(read(dbFile, &manager, sizeof(manager)) == sizeof(manager))
     {
         // Compare sanitized input against stored password
-        if (manager.staffID == managerID && strcmp(manager.password, password_input) == 0 && manager.roleType == 0) { // 0 = Manager
+        if (manager.employeeID == managerID && strcmp(manager.password, password_input) == 0 && manager.roleType == 0) { // 0 = Manager
            loggedIn = 1;
            break;
         }
@@ -237,7 +237,7 @@ void reviewClientFeedback(int clientSocket)
 }
 
 // Assign a requested loan (status 0) to an employee (status becomes 1)
-void assignLoanToStaff(int clientSocket)
+void assignLoanToEmployee(int clientSocket)
 {
     struct LoanRecord loan;
     int loanFile = open(LOAN_DB, O_RDWR); // Need RDWR to read and write
@@ -256,7 +256,7 @@ void assignLoanToStaff(int clientSocket)
     lseek(loanFile, 0, SEEK_SET); // Rewind
     while(read(loanFile, &loan, sizeof(loan)) == sizeof(loan))
     {
-        if(loan.assignedStaffID == -1 && loan.loanStatus == 0) // Unassigned and Requested
+        if(loan.assignedEmployeeID == -1 && loan.loanStatus == 0) // Unassigned and Requested
         {
             bzero(outBuffer, sizeof(outBuffer));
             sprintf(outBuffer, "-> Unassigned Loan ID: %d | Account: %d | Amount: %d^",
@@ -280,7 +280,7 @@ void assignLoanToStaff(int clientSocket)
 
 
     // --- Get assignment details ---
-    int loanID, staffID;
+    int loanID, employeeID;
     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Enter Loan ID to assign: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
@@ -293,7 +293,7 @@ void assignLoanToStaff(int clientSocket)
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { close(loanFile); return; }
     inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
-    staffID = atoi(inBuffer);
+    employeeID = atoi(inBuffer);
     // --- End getting details ---
 
 
@@ -335,20 +335,20 @@ void assignLoanToStaff(int clientSocket)
 
 
     // Check if it's still unassigned and requested
-    if(loan.assignedStaffID != -1 || loan.loanStatus != 0) {
+    if(loan.assignedEmployeeID != -1 || loan.loanStatus != 0) {
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Loan %d was already assigned or processed.^", loanID);
     } else {
-        // TODO: Optionally check if staffID exists in staff_records.dat?
-        loan.assignedStaffID = staffID;
+        // TODO: Optionally check if employeeID exists in employee_records.dat?
+        loan.assignedEmployeeID = employeeID;
         loan.loanStatus = 1; // 1 = Pending (assigned)
 
         lseek(loanFile, offset, SEEK_SET);
         write(loanFile, &loan, sizeof(loan));
 
-        printf("Manager assigned loan %d to staff %d\n", loanID, staffID);
+        printf("Manager assigned loan %d to employee %d\n", loanID, employeeID);
         bzero(outBuffer, sizeof(outBuffer));
-        sprintf(outBuffer, "Loan %d assigned to staff %d.^", loanID, staffID);
+        sprintf(outBuffer, "Loan %d assigned to employee %d.^", loanID, employeeID);
     }
 
     // Unlock and close
@@ -369,8 +369,8 @@ assignloan_unlock_fail: // Cleanup
 // Wrapper for changing Manager's own password
 int updateManagerPassword(int clientSocket, int managerID)
 {
-    // This calls the function defined in staff_ops.h
-    return updateStaffPassword(clientSocket, managerID);
+    // This calls the function defined in employee_ops.h
+    return updateEmployeePassword(clientSocket, managerID);
 }
 
 // Main handler for the Manager menu and actions
@@ -423,13 +423,13 @@ label_manager_login:
                     setAccountActiveStatus(clientSocket); // Handles own acks
                     break;
                 case 2: // Assign Loan
-                    assignLoanToStaff(clientSocket); // Handles own acks
+                    assignLoanToEmployee(clientSocket); // Handles own acks
                     break;
                 case 3: // Review Feedback
                     reviewClientFeedback(clientSocket); // Handles own acks
                     break;
                 case 4: // Change Password
-                    if(updateManagerPassword(clientSocket, authManagerID)) { // Calls staff func
+                    if(updateManagerPassword(clientSocket, authManagerID)) { // Calls employee func
                         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer,"Password changed. Please log in again.^");
                     } else {
                          bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer,"Password change failed.^");

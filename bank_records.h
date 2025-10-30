@@ -12,16 +12,16 @@ struct ClientFeedback
     char message[1024];
 };
 
-struct BankStaff {
-    int staffID;
+struct Employee {
+    int employeeID;
     char firstName[20];
     char lastName[20];
     char password[50]; // Plaintext password
-    int roleType; // 0 -> Manager, 1 -> Staff
+    int roleType; // 0 -> Manager, 1 -> Employee
 };
 
 struct LoanRecord {
-    int assignedStaffID;
+    int assignedEmployeeID;
     int accountID;
     int loanRecordID;
     int amount;

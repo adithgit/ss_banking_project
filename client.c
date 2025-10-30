@@ -1,37 +1,35 @@
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h> // For sockaddr_in
-#include <arpa/inet.h> // For inet_addr (optional, INADDR_ANY is simpler)
+#include <netinet/in.h>
+#include <arpa/inet.h> 
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <termios.h> // For masking password input
+#include <termios.h> 
 
-// Function prototypes
 void serverCommunicationLoop(int serverSocket);
 void getMaskedInput(char *buffer, int bufSize);
 
-int main(int argc, char *argv[]) // Use standard main signature
+int main(int argc, char *argv[]) 
 {
     int serverSocket;
     int connectStatus;
     struct sockaddr_in serverAddress;
-    const char *serverIP = "127.0.0.1"; // Default to localhost
-    int serverPort = 8080; // Default port
+    const char *serverIP = "127.0.0.1"; 
+    int serverPort = 8080; 
 
     // Optional: Allow specifying server IP and Port via command line
-    if (argc > 1) {
-        serverIP = argv[1];
-    }
-    if (argc > 2) {
-        serverPort = atoi(argv[2]);
-        if (serverPort <= 0 || serverPort > 65535) {
-             fprintf(stderr, "Invalid port number: %s\n", argv[2]);
-             exit(EXIT_FAILURE);
-        }
-    }
-
+    // if (argc > 1) {
+    //     serverIP = argv[1];
+    // }
+    // if (argc > 2) {
+    //     serverPort = atoi(argv[2]);
+    //     if (serverPort <= 0 || serverPort > 65535) {
+    //          fprintf(stderr, "Invalid port number: %s\n", argv[2]);
+    //          exit(EXIT_FAILURE);
+    //     }
+    // }
 
     serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket == -1)
@@ -39,9 +37,8 @@ int main(int argc, char *argv[]) // Use standard main signature
         perror("Client socket creation failed");
         exit(EXIT_FAILURE);
     }
-    printf("Client socket created!\n");
+    printf("Client socket created\n");
 
-    // serverAddress.sin_addr.s_addr = htonl(INADDR_ANY); // INADDR_ANY is for BINDING, not connecting
     serverAddress.sin_addr.s_addr = inet_addr(serverIP); // Use specific IP
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(serverPort);
@@ -54,21 +51,21 @@ int main(int argc, char *argv[]) // Use standard main signature
         close(serverSocket);
         exit(EXIT_FAILURE);
     }
-    printf("Connected to server!\n");
+    printf("Connected to server\n");
 
     serverCommunicationLoop(serverSocket);
 
     close(serverSocket);
     printf("Connection closed.\n");
-    return 0; // Use return 0 for success
+    return 0; 
 }
 
-// Handles reading prompts from server and sending user input
+// interacting with sever loop
 void serverCommunicationLoop(int serverSocket)
 {
     char inBuffer[4096], outBuffer[4096], displayBuffer[4096];
     int readBytes, writeBytes;
-    ssize_t inputLen; // For getline
+    ssize_t inputLen; 
 
     do
     {
@@ -84,17 +81,13 @@ void serverCommunicationLoop(int serverSocket)
              }
             break;
         }
-        inBuffer[readBytes] = '\0'; // Null-terminate received data
-
-        // Check for password prompt - more robust check
+        inBuffer[readBytes] = '\0'; 
         int isPasswordPrompt = (strstr(inBuffer, "password:") != NULL || strstr(inBuffer, "Password:") != NULL);
 
         // Server signals client to exit immediately
         if(strcmp(inBuffer, "Client logging out...\n") == 0)
         {
-            printf("%s", inBuffer); // Show the logout message
-            // Optionally send a final ACK, though server might close immediately
-            // write(serverSocket, "ACK", 3);
+            printf("%s", inBuffer);
             break; // Exit loop
         }
 
@@ -105,21 +98,20 @@ void serverCommunicationLoop(int serverSocket)
             if (strlen(inBuffer) > 0) {
                  printf("%s\n", inBuffer); // Print message before the '^'
             }
-             // Send an ACK back to the server
+             // send ack
              strcpy(outBuffer, "ACK");
 
         } else if (isPasswordPrompt) {
             // Print the password prompt without extra newline
             printf("%s", inBuffer);
-            fflush(stdout); // Ensure prompt is displayed before input
-            getMaskedInput(outBuffer, sizeof(outBuffer)); // Get masked input
+            fflush(stdout); // to ennsure prompt is displayed before input
+            getMaskedInput(outBuffer, sizeof(outBuffer)); 
 
         } else {
             // Standard prompt from server, needs user input
-             printf("%s", inBuffer); // Print the prompt
+             printf("%s", inBuffer);
              fflush(stdout);
-
-             // Read user input line (safer than scanf)
+             // Read user input line 
              if (fgets(outBuffer, sizeof(outBuffer), stdin) == NULL) {
                  // Handle EOF or read error
                  printf("\nInput error or EOF detected. Exiting.\n");
@@ -129,44 +121,38 @@ void serverCommunicationLoop(int serverSocket)
              outBuffer[strcspn(outBuffer, "\r\n")] = 0;
         }
 
-        // Send the response (ACK, password, or regular input)
-        writeBytes = write(serverSocket, outBuffer, strlen(outBuffer)); // Send exact length
-        if(writeBytes < 0) // Check for write error
+        // send the response (ACK, password, or regular input)
+        writeBytes = write(serverSocket, outBuffer, strlen(outBuffer));
+        if(writeBytes < 0)
         {
             perror("Client write to server failed");
             break;
         }
+        // write was not completed fully
         if (writeBytes < strlen(outBuffer)) {
             fprintf(stderr, "Warning: Partial write to server occurred.\n");
-            // Handle partial write? Maybe retry or exit.
         }
 
 
     } while(readBytes > 0); // Continue loop as long as server is sending data
 }
 
-// Reads password input without echoing characters to the terminal
+// for passwords
 void getMaskedInput(char *buffer, int bufSize) {
     struct termios oldTerm, newTerm;
     int nread;
-
     // Get current terminal settings
     if (tcgetattr(STDIN_FILENO, &oldTerm) != 0) {
         perror("tcgetattr failed");
-        // Fallback to regular input? Or just read?
         fgets(buffer, bufSize, stdin); // Simple fallback
         buffer[strcspn(buffer, "\r\n")] = 0; // Remove newline
         return;
     }
 
     newTerm = oldTerm;
-    // Disable echo and canonical mode (line buffering)
     newTerm.c_lflag &= ~(ECHO | ICANON);
-    // Set minimum characters to read (1) and timeout (0 = block indefinitely)
-    // newTerm.c_cc[VMIN] = 1;
-    // newTerm.c_cc[VTIME] = 0;
-
-    // Apply new settings
+    
+    // set new settings
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &newTerm) != 0) {
          perror("tcsetattr failed");
          // Fallback
@@ -175,18 +161,15 @@ void getMaskedInput(char *buffer, int bufSize) {
          return;
     }
 
-    // Read input (fgets is generally safer than scanf)
+    // read i/p
     if (fgets(buffer, bufSize, stdin) == NULL) {
-        // Handle read error or EOF
-        *buffer = '\0'; // Ensure buffer is empty on error
+        *buffer = '\0'; 
         perror("fgets error during masked input");
     } else {
-         // Remove trailing newline from fgets
          buffer[strcspn(buffer, "\r\n")] = 0;
     }
 
-
-    // Restore original settings
+    // back to original settings
     tcsetattr(STDIN_FILENO, TCSANOW, &oldTerm);
-    printf("\n"); // Move to next line after password entry
+    printf("\n");
 }

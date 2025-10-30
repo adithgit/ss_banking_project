@@ -1,5 +1,5 @@
-#ifndef STAFF_OPS_H
-#define STAFF_OPS_H
+#ifndef EMPLOYEE_OPS_H
+#define EMPLOYEE_OPS_H
 
 #include <string.h> // For strcspn, strncpy, strcmp, strlen
 #include <stdio.h>  // For perror, printf, sprintf
@@ -14,28 +14,28 @@
 // #include "bank_records.h" // Not needed here if included before in server.c
 
 // --- Function Prototypes ---
-int authenticateStaff(int clientSocket, int staffID, char *password_input);
+int authenticateEmployee(int clientSocket, int employeeID, char *password_input);
 void createNewCustomerAccount(int clientSocket);
-void processLoanApplication(int clientSocket, int staffID);
-void viewAssignedLoans(int clientSocket, int staffID);
-int updateStaffPassword(int clientSocket, int staffID);
-void handleStaffSession(int clientSocket); // Main handler prototype
+void processLoanApplication(int clientSocket, int employeeID);
+void viewAssignedLoans(int clientSocket, int employeeID);
+int updateEmployeePassword(int clientSocket, int employeeID);
+void handleEmployeeSession(int clientSocket); // Main handler prototype
 // Note: modifyUser and viewTransactionLogs are declared/defined elsewhere (admin_ops.h, customer_ops.h)
 
 // --- Function Definitions ---
 
-// Authenticate a staff member (Role 1)
-int authenticateStaff(int clientSocket, int staffID, char *password_input)
+// Authenticate a employee member (Role 1)
+int authenticateEmployee(int clientSocket, int employeeID, char *password_input)
 {
-    struct BankStaff staff;
-    int dbFile = open(STAFF_DB, O_RDONLY); // Open RDONLY first
+    struct Employee employee;
+    int dbFile = open(EMPLOYEE_DB, O_RDONLY); // Open RDONLY first
     if (dbFile == -1) {
          if (errno == ENOENT) { // File doesn't exist? Create empty one
-             dbFile = open(STAFF_DB, O_WRONLY | O_CREAT, 0644);
+             dbFile = open(EMPLOYEE_DB, O_WRONLY | O_CREAT, 0644);
              if (dbFile != -1) close(dbFile);
-             printf("Created empty staff database file: %s\n", STAFF_DB);
+             printf("Created empty employee database file: %s\n", EMPLOYEE_DB);
          } else {
-            perror("AuthStaff: Error opening staff DB for read");
+            perror("AuthEmployee: Error opening employee DB for read");
             return 0; // Cannot authenticate
          }
     } else {
@@ -43,29 +43,29 @@ int authenticateStaff(int clientSocket, int staffID, char *password_input)
     }
 
     // Session lock
-    sessionSemaphore = createSessionLock(staffID);
+    sessionSemaphore = createSessionLock(employeeID);
     if (sessionSemaphore == SEM_FAILED) {
-         perror("AuthStaff: Failed to create/open session semaphore");
+         perror("AuthEmployee: Failed to create/open session semaphore");
          return 0;
     }
     setupSignalHandlers();
 
     if (sem_trywait(sessionSemaphore) == -1) {
         if (errno == EAGAIN) {
-            printf("Staff %d is already logged in!\n", staffID);
+            printf("Employee %d is already logged in!\n", employeeID);
             bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "This ID is already logged in elsewhere.^");
             write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         } else {
-            perror("AuthStaff: sem_trywait failed");
+            perror("AuthEmployee: sem_trywait failed");
         }
         sem_close(sessionSemaphore); // Close our handle
         return 0;
     }
 
     // Now open for reading credentials
-     dbFile = open(STAFF_DB, O_RDONLY);
+     dbFile = open(EMPLOYEE_DB, O_RDONLY);
      if (dbFile == -1) {
-          perror("AuthStaff: Error opening staff DB for login check");
+          perror("AuthEmployee: Error opening employee DB for login check");
           sem_post(sessionSemaphore); sem_close(sessionSemaphore); sem_unlink(sessionSemName);
           return 0;
      }
@@ -73,10 +73,10 @@ int authenticateStaff(int clientSocket, int staffID, char *password_input)
     // Check credentials
     int loggedIn = 0;
     lseek(dbFile, 0, SEEK_SET);
-    while(read(dbFile, &staff, sizeof(staff)) == sizeof(staff)) // Check read result
+    while(read(dbFile, &employee, sizeof(employee)) == sizeof(employee)) // Check read result
     {
         // Compare sanitized input against stored password
-        if (staff.staffID == staffID && strcmp(staff.password, password_input) == 0 && staff.roleType == 1) { // 1 = Staff
+        if (employee.employeeID == employeeID && strcmp(employee.password, password_input) == 0 && employee.roleType == 1) { // 1 = Employee
             loggedIn = 1;
             break;
         }
@@ -90,7 +90,7 @@ int authenticateStaff(int clientSocket, int staffID, char *password_input)
         sem_unlink(sessionSemName);
         return 0; // Failure
     }
-    printf("Staff %d logged in.\n", staffID);
+    printf("Employee %d logged in.\n", employeeID);
     return 1; // Success - Semaphore still held!
 }
 
@@ -213,7 +213,7 @@ void createNewCustomerAccount(int clientSocket) {
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
 
-    printf("Staff added customer %d\n", account.accountID);
+    printf("Employee added customer %d\n", account.accountID);
 
     // Send appropriate confirmation message
     if (logFile == -1) {
@@ -232,8 +232,8 @@ createcust_unlock_fail: // Cleanup label
 }
 
 
-// Process a loan application assigned to this staff member
-void processLoanApplication(int clientSocket, int staffID)
+// Process a loan application assigned to this employee member
+void processLoanApplication(int clientSocket, int employeeID)
 {
     char logBuffer[1024];
     struct LoanRecord loan;
@@ -282,8 +282,8 @@ void processLoanApplication(int clientSocket, int staffID)
         goto loanproc_close_files;
     }
 
-    // Check if assigned to this staff and is pending
-    if(loan.assignedStaffID != staffID || loan.loanStatus != 1) { // 1 = Pending
+    // Check if assigned to this employee and is pending
+    if(loan.assignedEmployeeID != employeeID || loan.loanStatus != 1) { // 1 = Pending
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Loan ID %d is not assigned to you or is not pending.^", loanID);
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
@@ -335,7 +335,7 @@ void processLoanApplication(int clientSocket, int staffID)
          perror("ProcessLoan: Loan re-read failed"); goto loanproc_unlock_both;
      }
      // Re-verify assignment and status *after* locks
-     if(loan.assignedStaffID != staffID || loan.loanStatus != 1) {
+     if(loan.assignedEmployeeID != employeeID || loan.loanStatus != 1) {
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Loan ID %d status changed before processing.^", loanID);
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
@@ -439,8 +439,8 @@ loanproc_close_files:
     close(loanFile);
 }
 
-// View loans currently assigned to this staff member and pending
-void viewAssignedLoans(int clientSocket, int staffID)
+// View loans currently assigned to this employee member and pending
+void viewAssignedLoans(int clientSocket, int employeeID)
 {
     struct LoanRecord loan;
     int loanFile = open(LOAN_DB, O_RDONLY);
@@ -457,7 +457,7 @@ void viewAssignedLoans(int clientSocket, int staffID)
     int found = 0;
     while(read(loanFile, &loan, sizeof(loan)) == sizeof(loan))
     {
-        if(loan.assignedStaffID == staffID && loan.loanStatus == 1) // 1 = Pending
+        if(loan.assignedEmployeeID == employeeID && loan.loanStatus == 1) // 1 = Pending
         {
             bzero(outBuffer, sizeof(outBuffer));
             sprintf(outBuffer, "Loan ID: %d | Account: %d | Amount: %d^",
@@ -481,14 +481,14 @@ void viewAssignedLoans(int clientSocket, int staffID)
     }
 }
 
-// Change the password for a staff member or manager
-int updateStaffPassword(int clientSocket, int staffID) // Used by both Staff and Manager
+// Change the password for a employee member or manager
+int updateEmployeePassword(int clientSocket, int employeeID) // Used by both employee and Manager
 {
     char newPassword[50];
-    struct BankStaff staff;
-    int dbFile = open(STAFF_DB, O_RDWR);
+    struct Employee employee;
+    int dbFile = open(EMPLOYEE_DB, O_RDWR);
      if(dbFile == -1) {
-        perror("StaffChangePass: Error opening DB");
+        perror("ChangePass: Error opening DB");
         return 0; // Failure
      }
 
@@ -496,23 +496,23 @@ int updateStaffPassword(int clientSocket, int staffID) // Used by both Staff and
     int offset = -1;
     off_t currentPos = 0;
     lseek(dbFile, 0, SEEK_SET);
-    while (read(dbFile, &staff, sizeof(staff)) > 0)
+    while (read(dbFile, &employee, sizeof(employee)) > 0)
     {
-        currentPos = lseek(dbFile, 0, SEEK_CUR) - sizeof(staff);
-        if(staff.staffID == staffID) {
+        currentPos = lseek(dbFile, 0, SEEK_CUR) - sizeof(employee);
+        if(employee.employeeID == employeeID) {
             offset = currentPos;
             break;
         }
     }
     if(offset == -1) {
-        printf("StaffChangePass: Staff/Manager ID %d not found\n", staffID);
+        printf("Changepass: employee/Manager ID %d not found\n", employeeID);
         close(dbFile); return 0; // Failure
      }
 
     // Lock record
-    struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct BankStaff), getpid()};
+    struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct Employee), getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
-         perror("StaffChangePass: Failed to lock record");
+         perror("ChangePass: Failed to lock record");
          close(dbFile); return 0; // Failure
     }
 
@@ -535,42 +535,42 @@ int updateStaffPassword(int clientSocket, int staffID) // Used by both Staff and
 
     // Re-read data before writing
     lseek(dbFile, offset, SEEK_SET);
-    if (read(dbFile, &staff, sizeof(staff)) != sizeof(staff)) {
-        perror("StaffChangePass: Re-read failed");
+    if (read(dbFile, &employee, sizeof(employee)) != sizeof(employee)) {
+        perror("ChangePass: Re-read failed");
         lock.l_type = F_UNLCK; fcntl(dbFile, F_SETLK, &lock); close(dbFile);
         return 0; // Failure
     }
 
     // Update password in struct
-    strncpy(staff.password, newPassword, sizeof(staff.password) - 1);
-    staff.password[sizeof(staff.password) - 1] = '\0';
+    strncpy(employee.password, newPassword, sizeof(employee.password) - 1);
+    employee.password[sizeof(employee.password) - 1] = '\0';
 
 
     lseek(dbFile, offset, SEEK_SET);
-    write(dbFile, &staff, sizeof(staff));
+    write(dbFile, &employee, sizeof(employee));
 
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
 
-    printf("Staff/Manager %d changed password\n", staffID);
+    printf("employee/Manager %d changed password\n", employeeID);
     return 1; // Success
 }
 
-// Main handler for the Staff menu and actions
-void handleStaffSession(int clientSocket)
+// Main handler for the employee menu and actions
+void handleEmployeeSession(int clientSocket)
 {
-    int authStaffID = -1, accountChoice; // Initialize
+    int authEmployeeID = -1, accountChoice; // Initialize
     char password[51]; // Buffer for password input, size 51
 
-label_staff_login:
+label_employee_login:
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "\nEnter Employee ID: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) return;
     inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
-    authStaffID = atoi(inBuffer);
+    authEmployeeID = atoi(inBuffer);
 
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "Enter password: ");
@@ -584,7 +584,7 @@ label_staff_login:
 
 
     // Pass sanitized password
-    if(authenticateStaff(clientSocket, authStaffID, password))
+    if(authenticateEmployee(clientSocket, authEmployeeID, password))
     {
         bzero(outBuffer, sizeof(outBuffer));
         strcpy(outBuffer, "\nLogin Successfully^");
@@ -593,18 +593,18 @@ label_staff_login:
         while(1)
         {
             bzero(outBuffer, sizeof(outBuffer));
-            strcpy(outBuffer, STAFF_PROMPT);
+            strcpy(outBuffer, EMPLOYEE_PROMPT);
             write(clientSocket, outBuffer, strlen(outBuffer));
 
             bzero(inBuffer, sizeof(inBuffer));
             if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
-                 printf("Staff %d disconnected during session.\n", authStaffID);
-                terminateClientSession(clientSocket, authStaffID);
+                 printf("employee %d disconnected during session.\n", authEmployeeID);
+                terminateClientSession(clientSocket, authEmployeeID);
                 return;
             }
             inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize choice
             int choice = atoi(inBuffer);
-            printf("Staff %d choice: %d\n", authStaffID, choice);
+            printf("employee %d choice: %d\n", authEmployeeID, choice);
 
             switch(choice)
             {
@@ -615,10 +615,10 @@ label_staff_login:
                     modifyUser(clientSocket, 1); // Handles own acks
                     break;
                 case 3: // Approve/Reject Loans
-                    processLoanApplication(clientSocket, authStaffID); // Handles own acks
+                    processLoanApplication(clientSocket, authEmployeeID); // Handles own acks
                     break;
                 case 4: // View Assigned Loan Applications
-                    viewAssignedLoans(clientSocket, authStaffID); // Handles own acks
+                    viewAssignedLoans(clientSocket, authEmployeeID); // Handles own acks
                     break;
                 case 5: // View Customer Transactions
                     bzero(outBuffer, sizeof(outBuffer));
@@ -626,31 +626,31 @@ label_staff_login:
                     write(clientSocket, outBuffer, strlen(outBuffer));
 
                     bzero(inBuffer, sizeof(inBuffer));
-                    if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) goto disconnect_cleanup_staff;
+                    if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) goto disconnect_cleanup_employee;
                      inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
                     accountChoice = atoi(inBuffer);
 
                     viewTransactionLogs(clientSocket, accountChoice); // Handles own acks
                     break;
                 case 6: // Change Password
-                    if(updateStaffPassword(clientSocket, authStaffID)) {
+                    if(updateEmployeePassword(clientSocket, authEmployeeID)) {
                         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer,"Password changed. Please log in again.^");
                     } else {
                         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer,"Password change failed.^");
                     }
                     write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); // ack
-                    endUserSession(clientSocket, authStaffID);
-                    authStaffID = -1;
-                    goto label_staff_login; // Force re-login
+                    endUserSession(clientSocket, authEmployeeID);
+                    authEmployeeID = -1;
+                    goto label_employee_login; // Force re-login
                 case 7: // Logout
-                    printf("Staff ID: %d Logged Out!\n", authStaffID);
-                    endUserSession(clientSocket, authStaffID);
-                    authStaffID = -1;
+                    printf("Employee ID: %d Logged Out!\n", authEmployeeID);
+                    endUserSession(clientSocket, authEmployeeID);
+                    authEmployeeID = -1;
                     return; // Back to main server loop
                 case 8: // Exit
-                    printf("Staff ID: %d Exited!\n", authStaffID);
-                    terminateClientSession(clientSocket, authStaffID);
-                    authStaffID = -1;
+                    printf("Employee ID: %d Exited!\n", authEmployeeID);
+                    terminateClientSession(clientSocket, authEmployeeID);
+                    authEmployeeID = -1;
                     return; // Exit child process
                 default:
                     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Invalid Choice^");
@@ -662,17 +662,17 @@ label_staff_login:
     {
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "\nInvalid ID or Password^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
-        authStaffID = -1;
-        goto label_staff_login;
+        authEmployeeID = -1;
+        goto label_employee_login;
     }
 
-disconnect_cleanup_staff: // Label for handling disconnects
-    printf("Staff %d disconnected unexpectedly.\n", authStaffID);
-    if (authStaffID > 0) {
-        terminateClientSession(clientSocket, authStaffID);
+disconnect_cleanup_employee: // Label for handling disconnects
+    printf("Employee %d disconnected unexpectedly.\n", authEmployeeID);
+    if (authEmployeeID > 0) {
+        terminateClientSession(clientSocket, authEmployeeID);
     }
     return; // Exit child process
 }
 
 
-#endif // STAFF_OPS_H
+#endif 

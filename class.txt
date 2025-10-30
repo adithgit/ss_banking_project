@@ -5,9 +5,9 @@ classDiagram
     class Admin {
         <<Role>>
         +handleAdminSession()
-        +createNewStaff()
+        +createNewEmployee()
         +modifyUser()
-        +updateStaffRole()
+        +updateEmployeeRole()
         +changeAdminPassword()
     }
 
@@ -16,25 +16,25 @@ classDiagram
         +handleManagerSession()
         +authenticateManager()
         +setAccountActiveStatus()
-        +assignLoanToStaff()
+        +assignLoanToEmployee()
         +reviewClientFeedback()
         +updateManagerPassword()
     }
 
-    class BankStaff {
+    class Employee {
         <<struct>>
-        staffID: int
+        employeeID: int
         firstName: string
         lastName: string
         password: string
         roleType: int
         <<Functions>>
-        +handleStaffSession()
-        +authenticateStaff()
+        +handleEmployeeSession()
+        +authenticateEmployee()
         +createNewCustomerAccount()
         +processLoanApplication()
         +viewAssignedLoans()
-        +updateStaffPassword()
+        +updateEmployeePassword()
         +modifyUser()  // Calls admin func
         +viewTransactionLogs() // Calls customer func
     }
@@ -62,7 +62,7 @@ classDiagram
 
     class LoanRecord {
         <<struct>>
-        assignedStaffID: int
+        assignedEmployeeID: int
         accountID: int
         loanRecordID: int
         amount: int
@@ -85,10 +85,10 @@ classDiagram
         nextID: int
     }
 
-    Admin ..> BankStaff : "Manages"
-    Manager --|> BankStaff : "Is-A (roleType 0)"
-    BankStaff "1" -- "0..*" AccountHolder : "Manages/Creates"
-    BankStaff "1" -- "0..*" LoanRecord : "Processes"
+    Admin ..> BankEmployee : "Manages"
+    Manager --|> BankEmployee : "Is-A (roleType 0)"
+    BankEmployee "1" -- "0..*" AccountHolder : "Manages/Creates"
+    BankEmployee "1" -- "0..*" LoanRecord : "Processes"
     Manager "1" -- "0..*" LoanRecord : "Assigns"
     Manager "1" -- "0..*" ClientFeedback : "Reviews"
     AccountHolder "1" -- "0..*" LoanRecord : "Applies for"
