@@ -1,13 +1,12 @@
-#include <errno.h> // For checking errno with sem_trywait
-#include <stdio.h> // For perror
-#include <string.h> // For strcspn, strncpy, strcmp, strlen
-#include <stdlib.h> // For atof, atoi
-#include <time.h>   // For logging timestamp
-#include <unistd.h> // For read, write, lseek, close
-#include <fcntl.h>  // For file constants (O_RDWR etc) and fcntl
-#include <sys/types.h> // For off_t, pid_t
+#include <errno.h> 
+#include <stdio.h> 
+#include <string.h> 
+#include <stdlib.h>
+#include <time.h> 
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h> 
 
-// --- Function Prototypes ---
 void endUserSession(int clientSocket, int sessionID);
 int authenticateCustomer(int clientSocket, int accountID, char *password_input);
 void processDeposit(int clientSocket, int accountID);
@@ -18,9 +17,7 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
 void viewTransactionLogs(int clientSocket, int accountID);
 void submitFeedback(int clientSocket);
 int updateCustomerPassword(int clientSocket, int accountID);
-// void handleCustomerSession(int clientSocket); // Defined below
 
-// --- Function Definitions ---
 
 // ======================= Shared Session Function =======================
 void endUserSession(int clientSocket, int sessionID){
@@ -37,42 +34,37 @@ void endUserSession(int clientSocket, int sessionID){
     }
 
     bzero(outBuffer, sizeof(outBuffer));
-    strcpy(outBuffer, "^"); // Signal end of operation
-    write(clientSocket, outBuffer, strlen(outBuffer)); // Send exact length
-
+    strcpy(outBuffer, "^"); 
+    write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
-    read(clientSocket, inBuffer, 3); // Read "ACK" or handle timeout/error
+    read(clientSocket, inBuffer, 3); 
 }
 
 
-// Renamed loginCustomer
+// login customer
 int authenticateCustomer(int clientSocket, int accountID, char *password_input) {
     struct AccountHolder account;
-    int dbFile = open(ACCOUNT_DB, O_RDONLY); // Open RDONLY first for check
+    int dbFile = open(ACCOUNT_DB, O_RDONLY);
 
     if (dbFile == -1) {
-        // If file doesn't exist, create it (edge case for first run)
         if (errno == ENOENT) {
             dbFile = open(ACCOUNT_DB, O_WRONLY | O_CREAT, 0644);
-            if (dbFile != -1) close(dbFile); // Just create and close
+            if (dbFile != -1) close(dbFile); // crate if first time and close
             printf("Created empty account database file: %s\n", ACCOUNT_DB);
-            // Now attempt login again (will fail, but semaphore logic runs)
         } else {
             perror("Error opening account DB for read");
             return 0;
         }
     } else {
-        close(dbFile); // Close read-only handle if it existed
+        close(dbFile);
     }
-
-
-    // Initialize and try to lock the semaphore for this session
+    // sem init
     sessionSemaphore = createSessionLock(accountID);
      if (sessionSemaphore == SEM_FAILED) {
          perror("Failed to create/open session semaphore");
          return 0;
     }
-    setupSignalHandlers(); // Setup signal handlers for cleanup in this process
+    setupSignalHandlers(); 
 
     if (sem_trywait(sessionSemaphore) == -1) {
         if (errno == EAGAIN) {
@@ -85,11 +77,9 @@ int authenticateCustomer(int clientSocket, int accountID, char *password_input) 
             perror("sem_trywait failed");
         }
         sem_close(sessionSemaphore);
-        // Do NOT unlink here
         return 0;
     }
 
-    // Now open for reading credentials
     dbFile = open(ACCOUNT_DB, O_RDONLY);
     if (dbFile == -1) {
          perror("Error opening account DB for login check");
@@ -99,39 +89,34 @@ int authenticateCustomer(int clientSocket, int accountID, char *password_input) 
          return 0;
     }
 
-
-    // Check credentials
     int loggedIn = 0;
     lseek(dbFile, 0, SEEK_SET);
     while(read(dbFile, &account, sizeof(account)) > 0)
     {
-        // Compare input password (without newline) against stored password
         if (account.accountID == accountID && strcmp(account.password, password_input) == 0 && account.isActive == 1) {
             printf("Customer %d logged in.\n", accountID);
             loggedIn = 1;
-            break; // Found the user
+            break;
         }
     }
-    close(dbFile); // Close file regardless of login success
-
+    close(dbFile);
     if (!loggedIn) {
-        // Login failed, release the lock
+        // login failed
         sem_post(sessionSemaphore);
         sem_close(sessionSemaphore);
-        sem_unlink(sessionSemName); // Unlink since we held it briefly
-        return 0; // Failure
+        sem_unlink(sessionSemName); 
+        return 0; 
     }
 
-    return 1; // Success - IMPORTANT: Semaphore is still held by this process!
+    return 1; 
 }
 
-// Renamed depositMoney
+// deposit
 void processDeposit(int clientSocket, int accountID){
     char logBuffer[1024];
     struct AccountHolder account;
     struct TransactionLog log;
     float depositAmount;
-
     time_t now = time(NULL);
 	struct tm* localTime = localtime(&now);
 
@@ -167,7 +152,6 @@ void processDeposit(int clientSocket, int accountID){
         return;
     }
 
-    // Lock the specific account record
     struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct AccountHolder), getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
         perror("Deposit: Failed to lock account record");
@@ -179,7 +163,6 @@ void processDeposit(int clientSocket, int accountID){
         return;
     }
 
-    // Get amount from client
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "Enter the amount to deposit: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
@@ -187,27 +170,26 @@ void processDeposit(int clientSocket, int accountID){
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer) - 1) <= 0) {
         printf("Client disconnected during deposit amount entry.\n");
-        lock.l_type = F_UNLCK; // Unlock before exiting
+        lock.l_type = F_UNLCK; 
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
         return;
     }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0;
 
     depositAmount = atof(inBuffer);
     if(depositAmount <= 0) {
         bzero(outBuffer, sizeof(outBuffer));
         strcpy(outBuffer, "Invalid deposit amount.^");
         write(clientSocket, outBuffer, strlen(outBuffer));
-        read(clientSocket, inBuffer, 3); // Wait for ack
+        read(clientSocket, inBuffer, 3);
 
-        lock.l_type = F_UNLCK; // Unlock
+        lock.l_type = F_UNLCK; 
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
         return;
     }
 
-    // Re-read data after lock acquisition
     lseek(dbFile, offset, SEEK_SET);
     if (read(dbFile, &account, sizeof(account)) != sizeof(account)) {
          perror("Deposit: Failed to re-read record after lock");
@@ -217,32 +199,28 @@ void processDeposit(int clientSocket, int accountID){
          return;
     }
 
-
-    // Perform transaction
     account.currentBalance += depositAmount;
 
-    // --- Log Transaction ---
-    int logFile = open(HISTORY_DB, O_WRONLY | O_APPEND | O_CREAT, 0644); // Use WRONLY for append
+    // logging
+    int logFile = open(HISTORY_DB, O_WRONLY | O_APPEND | O_CREAT, 0644); 
     if (logFile == -1) {
         perror("Deposit: Error opening log file");
-        // Log locally, inform client about partial failure?
         printf("CRITICAL: Deposit to %d occurred but logging failed!\n", accountID);
-        // Still update account file, but warn client.
         lseek(dbFile, offset, SEEK_SET);
-        write(dbFile, &account, sizeof(account)); // Write updated account
+        write(dbFile, &account, sizeof(account)); 
 
-        lock.l_type = F_UNLCK; // Unlock account
+        lock.l_type = F_UNLCK; 
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
 
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Deposit successful BUT LOGGING FAILED! New Balance: %.2f^", account.currentBalance);
         write(clientSocket, outBuffer, strlen(outBuffer));
-        read(clientSocket, inBuffer, 3); // ack
+        read(clientSocket, inBuffer, 3); 
         return;
     }
-    // Lock log file for append (whole file lock for simplicity here)
-    struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file for append safety
+    
+    struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; //lock whole file for append safety
     fcntl(logFile, F_SETLKW, &logLock);
 
     bzero(logBuffer, sizeof(logBuffer));
@@ -256,18 +234,14 @@ void processDeposit(int clientSocket, int accountID){
     log.accountID = account.accountID;
     write(logFile, &log, sizeof(log));
 
-    // Unlock log file
     logLock.l_type = F_UNLCK;
     fcntl(logFile, F_SETLK, &logLock);
     close(logFile);
-    // --- End Log Transaction ---
 
-
-    // Update account file
+    // udpate account file
     lseek(dbFile, offset, SEEK_SET);
     write(dbFile, &account, sizeof(account));
 
-    // Unlock the account record
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
@@ -277,10 +251,9 @@ void processDeposit(int clientSocket, int accountID){
     bzero(outBuffer, sizeof(outBuffer));
     sprintf(outBuffer, "Deposit successful! New Balance: %.2f^", account.currentBalance);
     write(clientSocket, outBuffer, strlen(outBuffer));
-    read(clientSocket, inBuffer, 3); // Wait for ack
+    read(clientSocket, inBuffer, 3); 
 }
 
-// Renamed customerBal
 void checkBalance(int clientSocket, int accountID){
     struct AccountHolder account;
     int dbFile = open(ACCOUNT_DB, O_RDONLY);
@@ -292,10 +265,9 @@ void checkBalance(int clientSocket, int accountID){
         read(clientSocket, inBuffer, 3); // ack
         return;
     }
-    float balance = -1.0; // Indicate error if not found
+    float balance = -1.0; 
 
-    // Use a read lock for safety
-    struct flock lock = {F_RDLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file for read
+    struct flock lock = {F_RDLCK, SEEK_SET, 0, 0, getpid()}; 
     fcntl(dbFile, F_SETLKW, &lock);
 
     while(read(dbFile, &account, sizeof(account)) > 0) {
@@ -319,10 +291,10 @@ void checkBalance(int clientSocket, int accountID){
         strcpy(outBuffer, "Account not found.^");
     }
     write(clientSocket, outBuffer, strlen(outBuffer));
-    read(clientSocket, inBuffer, 3); // Wait for ack
+    read(clientSocket, inBuffer, 3); 
 }
 
-// Renamed withdrawMoney
+//  withdraw money
 void processWithdrawal(int clientSocket, int accountID){
     char logBuffer[1024];
     struct AccountHolder account;
@@ -363,7 +335,6 @@ void processWithdrawal(int clientSocket, int accountID){
         return;
     }
 
-    // Lock the record
     struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct AccountHolder), getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
         perror("Withdraw: Failed to lock record");
@@ -375,7 +346,6 @@ void processWithdrawal(int clientSocket, int accountID){
         return;
     }
 
-    // Get amount
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "Enter the amount to withdraw: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
@@ -388,11 +358,10 @@ void processWithdrawal(int clientSocket, int accountID){
         close(dbFile);
         return;
     }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0;
 
     withdrawAmount = atof(inBuffer);
 
-    // Re-read data after lock
     lseek(dbFile, offset, SEEK_SET);
      if (read(dbFile, &account, sizeof(account)) != sizeof(account)) {
          perror("Withdraw: Failed to re-read record after lock");
@@ -402,8 +371,7 @@ void processWithdrawal(int clientSocket, int accountID){
          return;
     }
 
-
-    // Check funds
+    // fund check
     if (withdrawAmount <= 0 || account.currentBalance < withdrawAmount ){
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Insufficient funds or invalid amount! Balance: %.2f^", account.currentBalance);
@@ -416,21 +384,19 @@ void processWithdrawal(int clientSocket, int accountID){
         return;
     }
 
-    // Process transaction
+    // process
     account.currentBalance -= withdrawAmount;
 
-     // --- Log Transaction ---
+     // -logging
     int logFile = open(HISTORY_DB, O_WRONLY | O_APPEND | O_CREAT, 0644);
     if (logFile == -1) {
         perror("Withdraw: Error opening log file");
         printf("CRITICAL: Withdraw from %d occurred but logging failed!\n", accountID);
-        // Update account file anyway
         lseek(dbFile, offset, SEEK_SET);
         write(dbFile, &account, sizeof(account));
-        lock.l_type = F_UNLCK; // Unlock account
+        lock.l_type = F_UNLCK;
         fcntl(dbFile, F_SETLK, &lock);
         close(dbFile);
-        // Inform client
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Withdrawal successful BUT LOGGING FAILED! Balance: %.2f^", account.currentBalance);
         write(clientSocket, outBuffer, strlen(outBuffer));
@@ -438,7 +404,7 @@ void processWithdrawal(int clientSocket, int accountID){
         return;
     }
 
-    struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole log file
+    struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; 
     fcntl(logFile, F_SETLKW, &logLock);
 
     bzero(logBuffer, sizeof(logBuffer));
@@ -455,14 +421,11 @@ void processWithdrawal(int clientSocket, int accountID){
     logLock.l_type = F_UNLCK;
     fcntl(logFile, F_SETLK, &logLock);
     close(logFile);
-    // --- End Log Transaction ---
 
-
-    // Update account file
+    // account update
     lseek(dbFile, offset, SEEK_SET);
     write(dbFile, &account, sizeof(account));
 
-    // Unlock account record
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
@@ -475,12 +438,11 @@ void processWithdrawal(int clientSocket, int accountID){
     read(clientSocket, inBuffer, 3); // ack
 }
 
-// Renamed applyLoan
+//  apply loan
 void requestLoan(int clientSocket, int accountID){
     struct IDGenerator idGen;
     struct LoanRecord loan;
 
-    // Get and update the next loan ID
     int counterFile = open(LOAN_COUNTER_DB, O_RDWR | O_CREAT, 0644);
     if(counterFile == -1) {
         perror("Loan Request: Failed to open counter DB");
@@ -490,7 +452,7 @@ void requestLoan(int clientSocket, int accountID){
         return;
      }
 
-    // Lock the entire counter file
+    // lock counter file
     struct flock idLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()};
     if (fcntl(counterFile, F_SETLKW, &idLock) == -1) {
         perror("Loan Request: Failed to lock counter DB");
@@ -508,16 +470,15 @@ void requestLoan(int clientSocket, int accountID){
         newLoanID = 1;
         idGen.nextID = 1;
     }
-    idGen.nextID = newLoanID + 1; // Prepare for next time
+    idGen.nextID = newLoanID + 1; 
     lseek(counterFile, 0, SEEK_SET);
     write(counterFile, &idGen, sizeof(idGen));
 
-    // Unlock counter file
     idLock.l_type = F_UNLCK;
     fcntl(counterFile, F_SETLK, &idLock);
     close(counterFile);
 
-    // Get loan amount from client
+    //loan amount from client
     int loanAmount;
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "Enter Loan Amount: ");
@@ -538,7 +499,6 @@ void requestLoan(int clientSocket, int accountID){
         return;
     }
 
-    // Open loan DB for append
     int loanFile = open(LOAN_DB, O_WRONLY | O_APPEND | O_CREAT, 0644);
     if(loanFile == -1) {
         perror("Loan Request: Failed to open loan DB");
@@ -547,15 +507,14 @@ void requestLoan(int clientSocket, int accountID){
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         return;
     }
-
-     // Lock for append safety
-    struct flock loanDBLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file
+    
+    struct flock loanDBLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; 
     fcntl(loanFile, F_SETLKW, &loanDBLock);
 
     loan.assignedEmployeeID = -1;
     loan.accountID = accountID;
     loan.amount = loanAmount;
-    loan.loanStatus = 0; // Requested
+    loan.loanStatus = 0; // requestd
     loan.loanRecordID = newLoanID;
 
     write(loanFile, &loan, sizeof(loan));
@@ -572,7 +531,7 @@ void requestLoan(int clientSocket, int accountID){
     read(clientSocket, inBuffer, 3); // ack
 }
 
-// Renamed transferFunds
+// send money
 void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, float transferAmount) {
     char logBuffer[1024];
     struct AccountHolder sourceAccount, destAccount, tempAccount;
@@ -609,9 +568,9 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
     off_t currentPos = 0;
     lseek(dbFile, 0, SEEK_SET);
     while(1) {
-        currentPos = lseek(dbFile, 0, SEEK_CUR); // Pos before read
+        currentPos = lseek(dbFile, 0, SEEK_CUR);
         int bytesRead = read(dbFile, &tempAccount, sizeof(tempAccount));
-        if (bytesRead <= 0) break; // EOF or read error
+        if (bytesRead <= 0) break; 
 
         if(tempAccount.accountID == sourceAccountID) {
             srcOffset = currentPos;
@@ -619,9 +578,8 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
         else if(tempAccount.accountID == destAccountID) {
             dstOffset = currentPos;
         }
-        if(srcOffset != -1 && dstOffset != -1) break; // Found both
+        if(srcOffset != -1 && dstOffset != -1) break;
     }
-
 
     if(dstOffset == -1) {
         bzero(outBuffer, sizeof(outBuffer));
@@ -637,12 +595,11 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
         close(dbFile);
         return;
     }
-
-    // Lock records. Lock lower offset first to prevent deadlock.
+    
     struct flock lock1 = {F_WRLCK, SEEK_SET, 0, sizeof(struct AccountHolder), getpid()};
     struct flock lock2 = {F_WRLCK, SEEK_SET, 0, sizeof(struct AccountHolder), getpid()};
 
-    // Assign locks based on which offset is smaller
+    // lock to smaller offest
     if (srcOffset < dstOffset) {
         lock1.l_start = srcOffset;
         lock2.l_start = dstOffset;
@@ -651,7 +608,6 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
         lock2.l_start = srcOffset;
     }
 
-    // Always lock in the same order (lowest offset first)
     if (fcntl(dbFile, F_SETLKW, &lock1) == -1) {
         perror("Transfer: Fcntl lock1 failed"); close(dbFile); return;
     }
@@ -659,8 +615,8 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
         perror("Transfer: Fcntl lock2 failed");
         lock1.l_type = F_UNLCK; fcntl(dbFile, F_SETLK, &lock1); close(dbFile); return;
     }
-
-    // Read data *after* acquiring locks
+    
+    //read 
     lseek(dbFile, srcOffset, SEEK_SET);
      if (read(dbFile, &sourceAccount, sizeof(sourceAccount)) != sizeof(sourceAccount)) {
          perror("Transfer: Failed read source after lock"); goto unlock_close;
@@ -670,7 +626,7 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
          perror("Transfer: Failed read dest after lock"); goto unlock_close;
      }
 
-    // Check funds
+    // check funds
     if (sourceAccount.currentBalance < transferAmount) {
         printf("Transfer: Insufficient funds (%.2f < %.2f).\n", sourceAccount.currentBalance, transferAmount);
         bzero(outBuffer, sizeof(outBuffer));
@@ -679,26 +635,25 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
         goto unlock_close;
     }
 
-    // Perform transfer
+    // transfer
     sourceAccount.currentBalance -= transferAmount;
     destAccount.currentBalance += transferAmount;
 
-    // --- Log Transactions ---
+    // logging
     int logFile = open(HISTORY_DB, O_WRONLY | O_APPEND | O_CREAT, 0644);
     if(logFile == -1) {
         perror("Transfer: Error opening log file");
         printf("CRITICAL: Transfer between %d and %d occurred but logging failed!\n", sourceAccountID, destAccountID);
-        // Write account changes anyway but warn client
         lseek(dbFile, srcOffset, SEEK_SET); write(dbFile, &sourceAccount, sizeof(sourceAccount));
         lseek(dbFile, dstOffset, SEEK_SET); write(dbFile, &destAccount, sizeof(destAccount));
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Transfer successful BUT LOGGING FAILED! New Balance: %.2f^", sourceAccount.currentBalance);
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
-        goto unlock_close; // Jump to cleanup
+        goto unlock_close; 
     }
 
     // Lock the log file
-    struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file
+    struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()};
     fcntl(logFile, F_SETLKW, &logLock);
 
     // Log for source
@@ -721,19 +676,15 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
     log.accountID = destAccountID;
     write(logFile, &log, sizeof(log));
 
-    // Unlock log file
     logLock.l_type = F_UNLCK;
     fcntl(logFile, F_SETLK, &logLock);
     close(logFile);
-    // --- End Log Transactions ---
 
-
-    // Write back to account file
+    // up;date account
     lseek(dbFile, srcOffset, SEEK_SET);
     write(dbFile, &sourceAccount, sizeof(sourceAccount));
     lseek(dbFile, dstOffset, SEEK_SET);
     write(dbFile, &destAccount, sizeof(destAccount));
-
 
     printf("Transfer %.2f from %d to %d successful.\n", transferAmount, sourceAccountID, destAccountID);
 
@@ -741,7 +692,7 @@ void executeTransfer(int clientSocket, int sourceAccountID, int destAccountID, f
     sprintf(outBuffer, "Transfer successful! New Balance: %.2f^", sourceAccount.currentBalance);
     write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
 
-unlock_close: // Label for unlocking and closing dbFile
+unlock_close: // cleanup dbfile / can be also used for closing 
     lock1.l_type = F_UNLCK;
     lock2.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock1);
@@ -749,10 +700,10 @@ unlock_close: // Label for unlocking and closing dbFile
     close(dbFile);
 }
 
-// Renamed transactionHistory
+// transactions log - will show last 10 
 void viewTransactionLogs(int clientSocket, int accountID){
     struct TransactionLog log;
-    int maxLogs = 10; // Show last 10
+    int maxLogs = 10;
     int logCount = 0;
     off_t fileSize, readPos;
 
@@ -766,44 +717,34 @@ void viewTransactionLogs(int clientSocket, int accountID){
         return;
     }
 
-    // Lock file for reading (shared lock)
     struct flock lock = {F_RDLCK, SEEK_SET, 0, 0, getpid()};
     fcntl(logFile, F_SETLKW, &lock);
 
-    // --- Logic to read last N logs ---
     fileSize = lseek(logFile, 0, SEEK_END);
     logCount = fileSize / sizeof(struct TransactionLog);
 
-    bzero(outBuffer, sizeof(outBuffer)); // Clear buffer
+    bzero(outBuffer, sizeof(outBuffer)); 
     int foundCount = 0;
 
-    // Calculate starting position for reading backwards
+    //starting position for reading backwards
     readPos = (logCount > maxLogs) ? fileSize - (maxLogs * sizeof(struct TransactionLog)) : 0;
-
-    // If starting from 0, handle case where file isn't perfectly divisible
-    if (readPos == 0 && fileSize > 0 && fileSize % sizeof(struct TransactionLog) != 0) {
-       // Adjust readPos slightly if needed, though reading from 0 is usually fine
-    }
-
     lseek(logFile, readPos, SEEK_SET);
 
     while(foundCount < maxLogs && read(logFile, &log, sizeof(log)) == sizeof(log))
     {
         if(log.accountID == accountID)
         {
-            // Simple check to prevent buffer overflow
+            //check to prevent buffer overflow
             if (strlen(outBuffer) + strlen(log.logEntry) + 1 < sizeof(outBuffer)) {
                  strcat(outBuffer, log.logEntry);
                  foundCount++;
             } else {
-                 // Buffer full, maybe add indication?
+                 // buffer full
                  strcat(outBuffer, "... (more entries truncated)\n");
                  break;
             }
         }
     }
-    // --- End reading logic ---
-
 
     lock.l_type = F_UNLCK;
     fcntl(logFile, F_SETLK, &lock);
@@ -813,12 +754,12 @@ void viewTransactionLogs(int clientSocket, int accountID){
         strcpy(outBuffer, "No transactions found.\n");
     }
 
-    strcat(outBuffer, "^"); // Signal end
+    strcat(outBuffer, "^");
     write(clientSocket, outBuffer, strlen(outBuffer));
-    read(clientSocket, inBuffer, 3); // ack
+    read(clientSocket, inBuffer, 3); 
 }
 
-// Renamed addFeedback
+
 void submitFeedback(int clientSocket){
     struct ClientFeedback feedback;
     int feedbackFile = open(FEEDBACK_DB, O_WRONLY | O_APPEND | O_CREAT, 0644);
@@ -830,8 +771,7 @@ void submitFeedback(int clientSocket){
         return;
      }
 
-    // Lock for append
-    struct flock lock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file
+    struct flock lock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; 
     fcntl(feedbackFile, F_SETLKW, &lock);
 
     int choice;
@@ -843,7 +783,7 @@ void submitFeedback(int clientSocket){
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <=0){
         printf("Client disconnected during feedback.\n"); goto feedback_unlock_close;
     }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
     choice = atoi(inBuffer);
 
     bzero(feedback.message, sizeof(feedback.message));
@@ -851,8 +791,7 @@ void submitFeedback(int clientSocket){
     else if(choice == 2) strncpy(feedback.message, "Average", sizeof(feedback.message)-1);
     else if(choice == 3) strncpy(feedback.message, "Poor", sizeof(feedback.message)-1);
     else strncpy(feedback.message, "Unknown Choice", sizeof(feedback.message)-1);
-    feedback.message[sizeof(feedback.message)-1] = '\0'; // Ensure null term
-
+    feedback.message[sizeof(feedback.message)-1] = '\0'; 
 
     write(feedbackFile, &feedback, sizeof(feedback));
 
@@ -861,14 +800,13 @@ feedback_unlock_close:
     fcntl(feedbackFile, F_SETLK, &lock);
     close(feedbackFile);
 
-    // Send confirmation regardless of potential disconnect during input
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "Thank you for your feedback!^");
     write(clientSocket, outBuffer, strlen(outBuffer));
-    read(clientSocket, inBuffer, 3); // ack
+    read(clientSocket, inBuffer, 3); 
 }
 
-// Renamed changePassword
+// change password
 int updateCustomerPassword(int clientSocket, int accountID){
     char newPassword[50];
     struct AccountHolder account;
@@ -879,7 +817,6 @@ int updateCustomerPassword(int clientSocket, int accountID){
         return 0;
      }
 
-    // Find offset
     int offset = -1;
     off_t currentPos = 0;
     lseek(dbFile, 0, SEEK_SET);
@@ -895,14 +832,12 @@ int updateCustomerPassword(int clientSocket, int accountID){
         close(dbFile); return 0;
     }
 
-    // Lock record
     struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct AccountHolder), getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
          perror("ChangePass: Failed to lock record");
          close(dbFile); return 0;
     }
 
-    // Get new password
     bzero(outBuffer, sizeof(outBuffer));
     strcpy(outBuffer, "Enter new password: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
@@ -911,11 +846,9 @@ int updateCustomerPassword(int clientSocket, int accountID){
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
         printf("Client disconnected during password change entry.\n");
         lock.l_type = F_UNLCK; fcntl(dbFile, F_SETLK, &lock); close(dbFile);
-        return 0; // Indicate failure
+        return 0;
     }
-    // Sanitize password input - Remove trailing newline
     inBuffer[strcspn(inBuffer, "\r\n")] = 0;
-    // Ensure null termination and prevent overflow
     strncpy(newPassword, inBuffer, sizeof(newPassword) - 1);
     newPassword[sizeof(newPassword) - 1] = '\0';
 
@@ -927,31 +860,27 @@ int updateCustomerPassword(int clientSocket, int accountID){
          return 0;
     }
 
-
-    // Update password in the struct (using the sanitized version)
+    // set pass
     strncpy(account.password, newPassword, sizeof(account.password) - 1);
     account.password[sizeof(account.password) - 1] = '\0';
-
-    // Write back
     lseek(dbFile, offset, SEEK_SET);
     write(dbFile, &account, sizeof(account));
 
-    // Unlock
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
 
     printf("Customer %d changed password\n", accountID);
-    return 1; // Indicate success
+    return 1; 
 }
 
 
-// Renamed customerMenu
+// customer session
 void handleCustomerSession(int clientSocket){
     struct AccountHolder account;
-    int authAccountID = -1, destAccountID; // Initialize authAccountID
+    int authAccountID = -1, destAccountID; 
     int choice;
-    char password[50]; // Buffer for password input
+    char password[50]; 
 
 label_customer_login:
     bzero(outBuffer, sizeof(outBuffer));
@@ -961,7 +890,7 @@ label_customer_login:
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
         printf("Client disconnected before login.\n"); return;
     }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize potential newline
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
     authAccountID = atoi(inBuffer);
 
     bzero(outBuffer, sizeof(outBuffer));
@@ -971,19 +900,17 @@ label_customer_login:
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
          printf("Client disconnected before login password.\n"); return;
      }
-    // Sanitize password input for login
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Remove trailing newline
-    strncpy(password, inBuffer, sizeof(password) - 1); // Copy safely
-    password[sizeof(password)-1] = '\0'; // Ensure null termination
+     
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
+    strncpy(password, inBuffer, sizeof(password) - 1); 
+    password[sizeof(password)-1] = '\0';
 
-
-    // Pass the sanitized password to the authentication function
     if (authenticateCustomer(clientSocket, authAccountID, password))
     {
         bzero(outBuffer, sizeof(outBuffer));
         strcpy(outBuffer, "\nLogin Successfully^");
         write(clientSocket, outBuffer, strlen(outBuffer));
-        read(clientSocket, inBuffer, 3); // ack
+        read(clientSocket, inBuffer, 3); 
 
         while(1)
         {
@@ -993,35 +920,34 @@ label_customer_login:
             bzero(inBuffer, sizeof(inBuffer));
             if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
                 printf("Client %d disconnected during session.\n", authAccountID);
-                terminateClientSession(clientSocket, authAccountID); // Release semaphore
+                terminateClientSession(clientSocket, authAccountID); 
                 return;
             }
-            inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize choice input
-
+            inBuffer[strcspn(inBuffer, "\r\n")] = 0;
             choice = atoi(inBuffer);
             printf("Customer %d choice: %d\n", authAccountID, choice);
 
             switch(choice)
             {
-                case 1: // Deposit
+                case 1: 
                     processDeposit(clientSocket, authAccountID);
                     break;
-                case 2: // Withdraw
+                case 2:
                     processWithdrawal(clientSocket, authAccountID);
                     break;
-                case 3: // View Balance
+                case 3: 
                     checkBalance(clientSocket, authAccountID);;
                     break;
-                case 4: // Apply Loan
+                case 4: 
                     requestLoan(clientSocket, authAccountID);
                     break;
-                case 5: // Transfer
+                case 5: 
                     bzero(outBuffer, sizeof(outBuffer));
                     strcpy(outBuffer, "Enter destination account number: ");
                     write(clientSocket, outBuffer, strlen(outBuffer));
                     bzero(inBuffer, sizeof(inBuffer));
                     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) goto disconnect_cleanup;
-                    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+                    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
                     destAccountID = atoi(inBuffer);
 
                     float amount;
@@ -1030,12 +956,12 @@ label_customer_login:
                     write(clientSocket, outBuffer, strlen(outBuffer));
                     bzero(inBuffer, sizeof(inBuffer));
                      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) goto disconnect_cleanup;
-                     inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+                     inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
                     amount = atof(inBuffer);
 
                     executeTransfer(clientSocket, authAccountID, destAccountID, amount);
                     break;
-                case 6: // Change Password
+                case 6: 
                     if(updateCustomerPassword(clientSocket, authAccountID)) {
                         bzero(outBuffer, sizeof(outBuffer));
                         strcpy(outBuffer, "Password changed. Please log in again.^");
@@ -1046,24 +972,24 @@ label_customer_login:
                         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
                     }
                     endUserSession(clientSocket, authAccountID);
-                    authAccountID = -1; // Reset auth ID after logout
-                    goto label_customer_login; // Force re-login
-                case 7: // View Transaction
+                    authAccountID = -1; 
+                    goto label_customer_login; //relogin
+                case 7: 
                     viewTransactionLogs(clientSocket, authAccountID);
                     break;
-                case 8: // Add Feedback
+                case 8: 
                     submitFeedback(clientSocket);
                     break;
-                case 9: // Logout
+                case 9: 
                     printf("%d logged out.\n", authAccountID);
                     endUserSession(clientSocket, authAccountID);
-                     authAccountID = -1; // Reset auth ID
-                    return; // Back to main menu
-                case 10: // Exit
+                     authAccountID = -1; 
+                    return; 
+                case 10: // exit
                     printf("Customer: %d Exited!\n", authAccountID);
                     terminateClientSession(clientSocket, authAccountID);
-                     authAccountID = -1; // Reset auth ID
-                    return; // Will close socket in parent
+                     authAccountID = -1;
+                    return; 
                 default:
                     bzero(outBuffer, sizeof(outBuffer));
                     strcpy(outBuffer, "Invalid Choice^");
@@ -1071,19 +997,19 @@ label_customer_login:
             }
         }
     }
-    else // Login Failed
+    else 
     {
-        // Login failed (auth function handles sem cleanup if needed)
+        // login failed
         bzero(outBuffer, sizeof(outBuffer));
         strcpy(outBuffer, "\nInvalid ID, Password, or Inactive Account^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
-         authAccountID = -1; // Reset auth ID
+         authAccountID = -1; // reset auth 
         goto label_customer_login;
     }
 
-disconnect_cleanup: // Label for handling disconnects within the switch case
+disconnect_cleanup: // disconnect cleanup
     printf("Client %d disconnected unexpectedly.\n", authAccountID);
-    if (authAccountID > 0) { // Only terminate if logged in
+    if (authAccountID > 0) { // terminate if logged in
          terminateClientSession(clientSocket, authAccountID);
     }
     return;

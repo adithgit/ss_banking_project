@@ -16,7 +16,7 @@ struct Employee {
     int employeeID;
     char firstName[20];
     char lastName[20];
-    char password[50]; // Plaintext password
+    char password[50]; 
     int roleType; // 0 -> Manager, 1 -> Employee
 };
 
@@ -32,7 +32,7 @@ struct AccountHolder {
     int accountID;
     float currentBalance;
     char holderName[20];
-    char password[50]; // Plaintext password
+    char password[50]; 
     int isActive; // 0 -> deactivate, 1 -> activate
 };
 

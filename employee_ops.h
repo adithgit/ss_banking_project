@@ -1,48 +1,39 @@
 #ifndef EMPLOYEE_OPS_H
 #define EMPLOYEE_OPS_H
 
-#include <string.h> // For strcspn, strncpy, strcmp, strlen
-#include <stdio.h>  // For perror, printf, sprintf
-#include <stdlib.h> // For atoi, atof
-#include <unistd.h> // For read, write, lseek, close, getpid
-#include <fcntl.h>  // For file constants (O_RDWR etc) and fcntl
-#include <errno.h>  // For checking errno with sem_trywait
-#include <time.h>   // For logging timestamp
-#include <sys/types.h> // For off_t, pid_t
+#include <string.h> 
+#include <stdio.h> 
+#include <stdlib.h> 
+#include <unistd.h> 
+#include <fcntl.h> 
+#include <errno.h>
+#include <time.h>  
+#include <sys/types.h>
 
-// Include structs (assuming bank_records.h is included *before* this in bank_server.c)
-// #include "bank_records.h" // Not needed here if included before in server.c
-
-// --- Function Prototypes ---
 int authenticateEmployee(int clientSocket, int employeeID, char *password_input);
 void createNewCustomerAccount(int clientSocket);
 void processLoanApplication(int clientSocket, int employeeID);
 void viewAssignedLoans(int clientSocket, int employeeID);
 int updateEmployeePassword(int clientSocket, int employeeID);
-void handleEmployeeSession(int clientSocket); // Main handler prototype
-// Note: modifyUser and viewTransactionLogs are declared/defined elsewhere (admin_ops.h, customer_ops.h)
+void handleEmployeeSession(int clientSocket); 
 
-// --- Function Definitions ---
-
-// Authenticate a employee member (Role 1)
 int authenticateEmployee(int clientSocket, int employeeID, char *password_input)
 {
     struct Employee employee;
-    int dbFile = open(EMPLOYEE_DB, O_RDONLY); // Open RDONLY first
+    int dbFile = open(EMPLOYEE_DB, O_RDONLY); 
     if (dbFile == -1) {
-         if (errno == ENOENT) { // File doesn't exist? Create empty one
+         if (errno == ENOENT) { // createe file if doesnt exists
              dbFile = open(EMPLOYEE_DB, O_WRONLY | O_CREAT, 0644);
              if (dbFile != -1) close(dbFile);
              printf("Created empty employee database file: %s\n", EMPLOYEE_DB);
          } else {
             perror("AuthEmployee: Error opening employee DB for read");
-            return 0; // Cannot authenticate
+            return 0; 
          }
     } else {
-        close(dbFile); // Close read handle if it existed
+        close(dbFile); 
     }
 
-    // Session lock
     sessionSemaphore = createSessionLock(employeeID);
     if (sessionSemaphore == SEM_FAILED) {
          perror("AuthEmployee: Failed to create/open session semaphore");
@@ -58,11 +49,9 @@ int authenticateEmployee(int clientSocket, int employeeID, char *password_input)
         } else {
             perror("AuthEmployee: sem_trywait failed");
         }
-        sem_close(sessionSemaphore); // Close our handle
+        sem_close(sessionSemaphore);
         return 0;
     }
-
-    // Now open for reading credentials
      dbFile = open(EMPLOYEE_DB, O_RDONLY);
      if (dbFile == -1) {
           perror("AuthEmployee: Error opening employee DB for login check");
@@ -70,12 +59,11 @@ int authenticateEmployee(int clientSocket, int employeeID, char *password_input)
           return 0;
      }
 
-    // Check credentials
+    // check credentials
     int loggedIn = 0;
     lseek(dbFile, 0, SEEK_SET);
-    while(read(dbFile, &employee, sizeof(employee)) == sizeof(employee)) // Check read result
+    while(read(dbFile, &employee, sizeof(employee)) == sizeof(employee)) 
     {
-        // Compare sanitized input against stored password
         if (employee.employeeID == employeeID && strcmp(employee.password, password_input) == 0 && employee.roleType == 1) { // 1 = Employee
             loggedIn = 1;
             break;
@@ -83,52 +71,44 @@ int authenticateEmployee(int clientSocket, int employeeID, char *password_input)
     }
     close(dbFile);
 
-    if (!loggedIn) {
-        // Auth failed, release lock
+    if (!loggedIn) { // failed auth
         sem_post(sessionSemaphore);
         sem_close(sessionSemaphore);
         sem_unlink(sessionSemName);
-        return 0; // Failure
+        return 0; 
     }
     printf("Employee %d logged in.\n", employeeID);
-    return 1; // Success - Semaphore still held!
+    return 1; 
 }
 
-// Add a new customer account
 void createNewCustomerAccount(int clientSocket) {
     struct AccountHolder account, tempAccount;
     struct TransactionLog log;
 
-    // --- Get all data from client first ---
-    // Get Name
     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Enter Name: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { printf("Client disconnected.\n"); return; }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
     strncpy(account.holderName, inBuffer, sizeof(account.holderName) - 1);
     account.holderName[sizeof(account.holderName)-1] = '\0';
 
-
-    // Get Password
     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Enter Password: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { printf("Client disconnected.\n"); return; }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0;
     strncpy(account.password, inBuffer, sizeof(account.password) - 1);
     account.password[sizeof(account.password)-1] = '\0';
 
-
-    // Get Account Number
     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Enter Account Number: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { printf("Client disconnected.\n"); return; }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0;
     account.accountID = atoi(inBuffer);
 
-    // --- Check for duplicate Account Number ---
+    // duplicate check
     int dbFile = open(ACCOUNT_DB, O_RDWR | O_CREAT, 0644);
     if(dbFile == -1) {
         perror("CreateCust: Error opening account DB");
@@ -137,7 +117,6 @@ void createNewCustomerAccount(int clientSocket) {
         return;
     }
 
-    // Acquire an EXCLUSIVE lock on the ENTIRE file
     struct flock lock = {F_WRLCK, SEEK_SET, 0, 0, getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
         perror("CreateCust: Failed to lock account DB");
@@ -148,7 +127,7 @@ void createNewCustomerAccount(int clientSocket) {
     }
 
     int duplicateFound = 0;
-    lseek(dbFile, 0, SEEK_SET); // Go to start
+    lseek(dbFile, 0, SEEK_SET); 
     while(read(dbFile, &tempAccount, sizeof(tempAccount)) == sizeof(tempAccount)) {
         if (tempAccount.accountID == account.accountID) {
             duplicateFound = 1;
@@ -156,46 +135,38 @@ void createNewCustomerAccount(int clientSocket) {
         }
     }
 
-    if (duplicateFound) {
+    if (duplicateFound) { // duplicate account found
         lock.l_type = F_UNLCK; fcntl(dbFile, F_SETLK, &lock); close(dbFile);
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Account number already exists.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
-        return; // Stop the function
+        return; 
     }
-    // --- End of duplicate check ---
-
-    // Get Opening Balance
+    
     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Enter Opening Balance: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
         printf("Client disconnected.\n"); goto createcust_unlock_fail;
     }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
     account.currentBalance = atof(inBuffer);
-    if (account.currentBalance < 0) account.currentBalance = 0; // Ensure non-negative balance
+    if (account.currentBalance < 0) account.currentBalance = 0; // negative balance not accepted
 
-
-    // --- Now, open log file and write data ---
     time_t now = time(NULL);
 	struct tm* localTime = localtime(&now);
 
     int logFile = open(HISTORY_DB, O_WRONLY | O_APPEND | O_CREAT, 0644);
     if(logFile == -1) {
         perror("CreateCust: Error opening log file");
-        // Log locally, proceed with account creation but inform client?
         printf("CRITICAL: Account %d created but initial log failed!\n", account.accountID);
-        // Continue to write account, but then send error message.
     } else {
-        // Lock log file for appending
-        struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; // Lock whole file
+        struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()}; 
         fcntl(logFile, F_SETLKW, &logLock);
-
         bzero(log.logEntry, sizeof(log.logEntry));
         sprintf(log.logEntry, "%.2f Opening Balance at %02d:%02d:%02d %d-%d-%d\n",
                 account.currentBalance, localTime->tm_hour, localTime->tm_min, localTime->tm_sec,
                 (localTime->tm_year)+1900, (localTime->tm_mon)+1, localTime->tm_mday);
-        log.logEntry[sizeof(log.logEntry)-1]='\0'; // Ensure null term
+        log.logEntry[sizeof(log.logEntry)-1]='\0'; 
         log.accountID = account.accountID;
         write(logFile, &log, sizeof(log));
 
@@ -203,19 +174,18 @@ void createNewCustomerAccount(int clientSocket) {
         close(logFile);
     }
 
-    // Save account (we still hold the lock on dbFile)
-    account.isActive = 1; // Active by default
-    lseek(dbFile, 0, SEEK_END); // Seek to end
+    // write to db
+    account.isActive = 1; // active by default
+    lseek(dbFile, 0, SEEK_END); // write to end of file 
     write(dbFile, &account, sizeof(account));
 
-    // Unlock account file
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
 
     printf("Employee added customer %d\n", account.accountID);
 
-    // Send appropriate confirmation message
+    //confirmation message
     if (logFile == -1) {
          bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Customer added BUT LOG FAILED!^");
     } else {
@@ -224,15 +194,13 @@ void createNewCustomerAccount(int clientSocket) {
     write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); // ack
     return;
 
-createcust_unlock_fail: // Cleanup label
+createcust_unlock_fail: // cleanup
     lock.l_type = F_UNLCK;
     fcntl(dbFile, F_SETLK, &lock);
     close(dbFile);
     return;
 }
 
-
-// Process a loan application assigned to this employee member
 void processLoanApplication(int clientSocket, int employeeID)
 {
     char logBuffer[1024];
@@ -245,7 +213,7 @@ void processLoanApplication(int clientSocket, int employeeID)
 
     int loanID;
     int loanFile = open(LOAN_DB, O_RDWR);
-    int accountFile = open(ACCOUNT_DB, O_RDWR); // Open account file here
+    int accountFile = open(ACCOUNT_DB, O_RDWR); 
 
     if(loanFile == -1 || accountFile == -1) {
         perror("ProcessLoan: Error opening DB files");
@@ -255,15 +223,15 @@ void processLoanApplication(int clientSocket, int employeeID)
         return;
     }
 
-    // Get Loan ID
+    // loan id 
     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Enter Loan ID to process: ");
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) { goto loanproc_close_files; }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0;
     loanID = atoi(inBuffer);
 
-    // Find loan record offset
+    // loan records include loan info
     int loanOffset = -1;
     off_t currentPosLoan = 0;
     lseek(loanFile, 0, SEEK_SET);
@@ -282,7 +250,7 @@ void processLoanApplication(int clientSocket, int employeeID)
         goto loanproc_close_files;
     }
 
-    // Check if assigned to this employee and is pending
+    // check if assigned to this employee and is pending
     if(loan.assignedEmployeeID != employeeID || loan.loanStatus != 1) { // 1 = Pending
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Loan ID %d is not assigned to you or is not pending.^", loanID);
@@ -290,13 +258,12 @@ void processLoanApplication(int clientSocket, int employeeID)
         goto loanproc_close_files;
     }
 
-    // Lock the loan record
     struct flock loanLock = {F_WRLCK, SEEK_SET, loanOffset, sizeof(struct LoanRecord), getpid()};
     if(fcntl(loanFile, F_SETLKW, &loanLock) == -1) {
         perror("ProcessLoan: Loan lock failed"); goto loanproc_close_files;
     }
-
-    // Find account record offset
+    
+    // get account 
     int accountOffset = -1;
     off_t currentPosAcc = 0;
     lseek(accountFile, 0, SEEK_SET);
@@ -309,32 +276,30 @@ void processLoanApplication(int clientSocket, int employeeID)
         }
     }
     if(accountOffset == -1) {
-        // This is a data inconsistency error! Loan exists but account doesn't.
+        // loan exists but account doesn't.
         printf("CRITICAL ERROR: Loan %d exists but account %d not found!\n", loanID, loan.accountID);
         bzero(outBuffer, sizeof(outBuffer)); sprintf(outBuffer, "Error: Account %d for loan %d not found!^", loan.accountID, loanID);
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
         goto loanproc_unlock_loan;
     }
 
-    // Lock the account record
     struct flock accLock = {F_WRLCK, SEEK_SET, accountOffset, sizeof(struct AccountHolder), getpid()};
     if(fcntl(accountFile, F_SETLKW, &accLock) == -1) {
          perror("ProcessLoan: Account lock failed"); goto loanproc_unlock_loan;
     }
 
-
-    // Re-read account data after lock
     lseek(accountFile, accountOffset, SEEK_SET);
      if (read(accountFile, &account, sizeof(account)) != sizeof(account)) {
          perror("ProcessLoan: Account re-read failed"); goto loanproc_unlock_both;
      }
 
-    // Re-read loan data after lock (in case status changed between find and lock)
+     // reread loan data
     lseek(loanFile, loanOffset, SEEK_SET);
      if (read(loanFile, &loan, sizeof(loan)) != sizeof(loan)) {
          perror("ProcessLoan: Loan re-read failed"); goto loanproc_unlock_both;
      }
-     // Re-verify assignment and status *after* locks
+
+     // reverify everything after locking 
      if(loan.assignedEmployeeID != employeeID || loan.loanStatus != 1) {
         bzero(outBuffer, sizeof(outBuffer));
         sprintf(outBuffer, "Loan ID %d status changed before processing.^", loanID);
@@ -342,11 +307,9 @@ void processLoanApplication(int clientSocket, int employeeID)
         goto loanproc_unlock_both;
     }
 
-
-    // Get decision
+    // get decision
     int choice;
     bzero(outBuffer, sizeof(outBuffer));
-    // Provide some context (optional but helpful)
     sprintf(outBuffer, "Processing Loan ID: %d\nAccount: %d (%s)\nCurrent Balance: %.2f\nLoan Amount: %d\n[1] Approve Loan\n[2] Reject Loan\nChoice: ",
              loanID, account.accountID, account.holderName, account.currentBalance, loan.amount);
     write(clientSocket, outBuffer, strlen(outBuffer));
@@ -354,11 +317,10 @@ void processLoanApplication(int clientSocket, int employeeID)
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
          printf("Client disconnected during loan decision.\n"); goto loanproc_unlock_both;
      }
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
     choice = atoi(inBuffer);
 
-    int logFile = -1; // Initialize log file descriptor
-
+    int logFile = -1; 
     if(choice == 1) // Approve
     {
         if(account.isActive == 0)
@@ -366,19 +328,17 @@ void processLoanApplication(int clientSocket, int employeeID)
             loan.loanStatus = 3; // 3 = Rejected
             printf("Loan %d rejected for inactive account %d\n", loanID, account.accountID);
             bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Account is inactive. Loan rejected.^");
-            // No balance change, no log needed. Just update loan status.
         }
         else
         {
             account.currentBalance += loan.amount;
             loan.loanStatus = 2; // 2 = Approved
 
-            // --- Log Transaction ---
+            //logging
             logFile = open(HISTORY_DB, O_WRONLY | O_APPEND | O_CREAT, 0644);
             if (logFile == -1) {
                 perror("ProcessLoan (Approve): Error opening log file");
                 printf("CRITICAL: Loan %d approved for %d but logging failed!\n", loanID, account.accountID);
-                // Update account & loan anyway, send warning message
                  bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Loan Approved BUT LOGGING FAILED!^");
             } else {
                 struct flock logLock = {F_WRLCK, SEEK_SET, 0, 0, getpid()};
@@ -397,9 +357,8 @@ void processLoanApplication(int clientSocket, int employeeID)
                 close(logFile);
                  bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Loan Approved.^");
             }
-             // --- End Log ---
 
-            // Update account file
+            // update account
             lseek(accountFile, accountOffset, SEEK_SET);
             write(accountFile, &account, sizeof(account));
 
@@ -411,23 +370,21 @@ void processLoanApplication(int clientSocket, int employeeID)
         loan.loanStatus = 3; // 3 = Rejected
         printf("Loan %d rejected for account %d\n", loanID, account.accountID);
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Loan Rejected.^");
-        // No balance change, no log needed. Just update loan status.
     }
     else // Invalid choice
     {
          printf("Invalid choice (%d) for loan %d.\n", choice, loanID);
          bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Invalid choice. No action taken.^");
-         // No status change, unlock and return
-         goto loanproc_unlock_both_ack; // Jump to send ack and unlock
+         goto loanproc_unlock_both_ack; 
     }
 
 
-    // Write updated loan status
+    //updated loan status
     lseek(loanFile, loanOffset, SEEK_SET);
     write(loanFile, &loan, sizeof(loan));
 
 loanproc_unlock_both_ack:
-    write(clientSocket, outBuffer, strlen(outBuffer)); // Send result message
+    write(clientSocket, outBuffer, strlen(outBuffer));
     read(clientSocket, inBuffer, 3); // ack
 
 loanproc_unlock_both:
@@ -439,7 +396,6 @@ loanproc_close_files:
     close(loanFile);
 }
 
-// View loans currently assigned to this employee member and pending
 void viewAssignedLoans(int clientSocket, int employeeID)
 {
     struct LoanRecord loan;
@@ -451,7 +407,7 @@ void viewAssignedLoans(int clientSocket, int employeeID)
         return;
     }
 
-    struct flock lock = {F_RDLCK, SEEK_SET, 0, 0, getpid()}; // Shared read lock
+    struct flock lock = {F_RDLCK, SEEK_SET, 0, 0, getpid()}; 
     fcntl(loanFile, F_SETLKW, &lock);
 
     int found = 0;
@@ -475,24 +431,23 @@ void viewAssignedLoans(int clientSocket, int employeeID)
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "No pending assigned loans found.^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
     } else {
-        // Send final empty ack after the last record or if none were found previously
+        //final empty ack after the last record or if none were found previously
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
     }
 }
 
-// Change the password for a employee member or manager
-int updateEmployeePassword(int clientSocket, int employeeID) // Used by both employee and Manager
+
+int updateEmployeePassword(int clientSocket, int employeeID) //-> used by both employee and Manager
 {
     char newPassword[50];
     struct Employee employee;
     int dbFile = open(EMPLOYEE_DB, O_RDWR);
      if(dbFile == -1) {
         perror("ChangePass: Error opening DB");
-        return 0; // Failure
+        return 0;
      }
 
-    // Find offset
     int offset = -1;
     off_t currentPos = 0;
     lseek(dbFile, 0, SEEK_SET);
@@ -506,14 +461,13 @@ int updateEmployeePassword(int clientSocket, int employeeID) // Used by both emp
     }
     if(offset == -1) {
         printf("Changepass: employee/Manager ID %d not found\n", employeeID);
-        close(dbFile); return 0; // Failure
+        close(dbFile); return 0; 
      }
 
-    // Lock record
     struct flock lock = {F_WRLCK, SEEK_SET, offset, sizeof(struct Employee), getpid()};
     if (fcntl(dbFile, F_SETLKW, &lock) == -1) {
          perror("ChangePass: Failed to lock record");
-         close(dbFile); return 0; // Failure
+         close(dbFile); return 0; 
     }
 
 
@@ -525,26 +479,22 @@ int updateEmployeePassword(int clientSocket, int employeeID) // Used by both emp
      if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) {
          printf("Client disconnected during password change entry.\n");
          lock.l_type = F_UNLCK; fcntl(dbFile, F_SETLK, &lock); close(dbFile);
-         return 0; // Failure
+         return 0; 
      }
-    // Sanitize password input
     inBuffer[strcspn(inBuffer, "\r\n")] = 0;
     strncpy(newPassword, inBuffer, sizeof(newPassword) - 1);
     newPassword[sizeof(newPassword) - 1] = '\0';
 
 
-    // Re-read data before writing
     lseek(dbFile, offset, SEEK_SET);
     if (read(dbFile, &employee, sizeof(employee)) != sizeof(employee)) {
         perror("ChangePass: Re-read failed");
         lock.l_type = F_UNLCK; fcntl(dbFile, F_SETLK, &lock); close(dbFile);
-        return 0; // Failure
+        return 0;
     }
-
-    // Update password in struct
+    
     strncpy(employee.password, newPassword, sizeof(employee.password) - 1);
     employee.password[sizeof(employee.password) - 1] = '\0';
-
 
     lseek(dbFile, offset, SEEK_SET);
     write(dbFile, &employee, sizeof(employee));
@@ -554,14 +504,13 @@ int updateEmployeePassword(int clientSocket, int employeeID) // Used by both emp
     close(dbFile);
 
     printf("employee/Manager %d changed password\n", employeeID);
-    return 1; // Success
+    return 1; 
 }
 
-// Main handler for the employee menu and actions
 void handleEmployeeSession(int clientSocket)
 {
-    int authEmployeeID = -1, accountChoice; // Initialize
-    char password[51]; // Buffer for password input, size 51
+    int authEmployeeID = -1, accountChoice; 
+    char password[51];
 
 label_employee_login:
     bzero(outBuffer, sizeof(outBuffer));
@@ -569,7 +518,7 @@ label_employee_login:
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) return;
-    inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+    inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
     authEmployeeID = atoi(inBuffer);
 
     bzero(outBuffer, sizeof(outBuffer));
@@ -577,13 +526,10 @@ label_employee_login:
     write(clientSocket, outBuffer, strlen(outBuffer));
     bzero(inBuffer, sizeof(inBuffer));
     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) return;
-    // Sanitize password input for login
     inBuffer[strcspn(inBuffer, "\r\n")] = 0;
     strncpy(password, inBuffer, sizeof(password) - 1);
     password[sizeof(password)-1] = '\0';
 
-
-    // Pass sanitized password
     if(authenticateEmployee(clientSocket, authEmployeeID, password))
     {
         bzero(outBuffer, sizeof(outBuffer));
@@ -602,37 +548,37 @@ label_employee_login:
                 terminateClientSession(clientSocket, authEmployeeID);
                 return;
             }
-            inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize choice
+            inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
             int choice = atoi(inBuffer);
             printf("employee %d choice: %d\n", authEmployeeID, choice);
 
             switch(choice)
             {
-                case 1: // Add New Customer
-                    createNewCustomerAccount(clientSocket); // Handles own acks
+                case 1:
+                    createNewCustomerAccount(clientSocket); 
                     break;
-                case 2: // Modify Customer Details
-                    modifyUser(clientSocket, 1); // Handles own acks
+                case 2: 
+                    modifyUser(clientSocket, 1); 
                     break;
-                case 3: // Approve/Reject Loans
-                    processLoanApplication(clientSocket, authEmployeeID); // Handles own acks
+                case 3: 
+                    processLoanApplication(clientSocket, authEmployeeID); 
                     break;
-                case 4: // View Assigned Loan Applications
-                    viewAssignedLoans(clientSocket, authEmployeeID); // Handles own acks
+                case 4: 
+                    viewAssignedLoans(clientSocket, authEmployeeID); 
                     break;
-                case 5: // View Customer Transactions
+                case 5: 
                     bzero(outBuffer, sizeof(outBuffer));
                     strcpy(outBuffer, "Enter Account Number: ");
                     write(clientSocket, outBuffer, strlen(outBuffer));
 
                     bzero(inBuffer, sizeof(inBuffer));
                     if(read(clientSocket, inBuffer, sizeof(inBuffer)-1) <= 0) goto disconnect_cleanup_employee;
-                     inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Sanitize
+                     inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
                     accountChoice = atoi(inBuffer);
 
-                    viewTransactionLogs(clientSocket, accountChoice); // Handles own acks
+                    viewTransactionLogs(clientSocket, accountChoice); 
                     break;
-                case 6: // Change Password
+                case 6: 
                     if(updateEmployeePassword(clientSocket, authEmployeeID)) {
                         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer,"Password changed. Please log in again.^");
                     } else {
@@ -641,24 +587,24 @@ label_employee_login:
                     write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); // ack
                     endUserSession(clientSocket, authEmployeeID);
                     authEmployeeID = -1;
-                    goto label_employee_login; // Force re-login
-                case 7: // Logout
+                    goto label_employee_login;
+                case 7: 
                     printf("Employee ID: %d Logged Out!\n", authEmployeeID);
                     endUserSession(clientSocket, authEmployeeID);
                     authEmployeeID = -1;
-                    return; // Back to main server loop
-                case 8: // Exit
+                    return; 
+                case 8: 
                     printf("Employee ID: %d Exited!\n", authEmployeeID);
                     terminateClientSession(clientSocket, authEmployeeID);
                     authEmployeeID = -1;
-                    return; // Exit child process
+                    return; 
                 default:
                     bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "Invalid Choice^");
                     write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3); // ack
             }
         }
     }
-    else // Login Failed
+    else 
     {
         bzero(outBuffer, sizeof(outBuffer)); strcpy(outBuffer, "\nInvalid ID or Password^");
         write(clientSocket, outBuffer, strlen(outBuffer)); read(clientSocket, inBuffer, 3);
@@ -666,13 +612,12 @@ label_employee_login:
         goto label_employee_login;
     }
 
-disconnect_cleanup_employee: // Label for handling disconnects
+disconnect_cleanup_employee: //disconnect cleanup
     printf("Employee %d disconnected unexpectedly.\n", authEmployeeID);
     if (authEmployeeID > 0) {
         terminateClientSession(clientSocket, authEmployeeID);
     }
-    return; // Exit child process
+    return; 
 }
-
 
 #endif 

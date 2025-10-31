@@ -160,13 +160,13 @@ void clientConnectionLoop(int clientSocketFD)
         }
 
         bzero(inBuffer, sizeof(inBuffer));
-        readBytes = read(clientSocketFD, inBuffer, sizeof(inBuffer) - 1); // Read one less for null term
+        readBytes = read(clientSocketFD, inBuffer, sizeof(inBuffer) - 1);
         if(readBytes <= 0) {
              perror("Read main choice failed or client disconnected");
             break;
         }
-        inBuffer[readBytes] = '\0'; // Null-terminate received data
-        inBuffer[strcspn(inBuffer, "\r\n")] = 0; // Remove potential newline
+        inBuffer[readBytes] = '\0'; // didn't read null so insert null
+        inBuffer[strcspn(inBuffer, "\r\n")] = 0; 
 
         userChoice = atoi(inBuffer);
         printf("Client FD %d choice: %d\n", clientSocketFD, userChoice);
@@ -186,8 +186,8 @@ void clientConnectionLoop(int clientSocketFD)
                 handleAdminSession(clientSocketFD);
                 break;
             case 5:
-                terminateClientSession(clientSocketFD, 0); // Special ID 0 for non-logged-in exit
-                return; // Exit connection loop
+                terminateClientSession(clientSocketFD, 0); //special ID 0 for non-logged-in exit
+                return; 
             default:
                 bzero(outBuffer, sizeof(outBuffer));
                 strcpy(outBuffer, "Invalid Choice for Login menu^");
@@ -202,7 +202,7 @@ void clientConnectionLoop(int clientSocketFD)
 // clean up semaphore and informs client before closing connection
 void terminateClientSession(int clientSocket, int sessionID)
 {
-    // Only unlink semaphore if a valid session was established (ID > 0)
+    // ->only unlink semaphore if a valid session was established (ID > 0)
     if (sessionID > 0) {
         snprintf(sessionSemName, 50, "/bms_sem_%d", sessionID);
         sem_t *sema = sem_open(sessionSemName, 0);
@@ -218,12 +218,11 @@ void terminateClientSession(int clientSocket, int sessionID)
     }
 
     bzero(outBuffer, sizeof(outBuffer));
-    strcpy(outBuffer, "Client logging out...\n"); // Inform client (non-critical if write fails)
+    strcpy(outBuffer, "Client logging out...\n"); 
     write(clientSocket, outBuffer, strlen(outBuffer));
-    // No need to wait for read, just close from server side in main/loop exit
 }
 
-// =================== Session Handling (Semaphores) =================
+// Session handling using sems
 
 // Signal handler for cleaning up semaphore on unexpected termination
 void sessionCleanupHandler(int signum) {
@@ -231,12 +230,12 @@ void sessionCleanupHandler(int signum) {
     // Check if this process was holding a session lock
     if (sessionSemaphore != NULL && strlen(sessionSemName) > 0) {
         printf("Attempting to cleanup semaphore %s...\n", sessionSemName);
-        sem_post(sessionSemaphore);  // Try to release the lock
-        sem_close(sessionSemaphore); // Close our handle
-        sem_unlink(sessionSemName); // Attempt to remove it (might fail if others use it)
+        sem_post(sessionSemaphore);  
+        sem_close(sessionSemaphore);
+        sem_unlink(sessionSemName);
         printf("Semaphore %s potentially cleaned up.\n", sessionSemName);
-        sessionSemaphore = NULL; // Reset global pointer
-        bzero(sessionSemName, sizeof(sessionSemName)); // Clear name buffer
+        sessionSemaphore = NULL; 
+        bzero(sessionSemName, sizeof(sessionSemName)); 
     } else {
         printf("No active session semaphore to clean up for this process.\n");
     }
@@ -248,12 +247,11 @@ void sessionCleanupHandler(int signum) {
 // create semaphore
 sem_t *createSessionLock(int sessionID) {
     snprintf(sessionSemName, 50, "/bms_sem_%d", sessionID);
-    // Create or open the semaphore, initialized to 1
-    // Permissions 0666 allow other users if needed, 0600 is stricter
+    // create or open the semaphore, initialized to 1
     sem_t *sem = sem_open(sessionSemName, O_CREAT, 0666, 1);
     if (sem == SEM_FAILED) {
         perror("sem_open failed in createSessionLock");
-        bzero(sessionSemName, sizeof(sessionSemName)); // Clear name on failure
+        bzero(sessionSemName, sizeof(sessionSemName)); 
     }
     return sem;
 }
@@ -263,11 +261,10 @@ void setupSignalHandlers() {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = sessionCleanupHandler;
-    sa.sa_flags = 0; // No SA_RESTART
+    sa.sa_flags = 0; 
 
-    sigaction(SIGINT, &sa, NULL);  // Ctrl+C
-    sigaction(SIGTERM, &sa, NULL); // Termination signal
-    sigaction(SIGQUIT, &sa, NULL); // Ctrl+\
-    sigaction(SIGHUP, &sa, NULL);  // Hangup
-    sigaction(SIGSEGV, &sa, NULL); // Segmentation fault
+    sigaction(SIGINT, &sa, NULL);  
+    sigaction(SIGTERM, &sa, NULL); 
+    sigaction(SIGQUIT, &sa, NULL); 
+    sigaction(SIGSEGV, &sa, NULL); 
 }
